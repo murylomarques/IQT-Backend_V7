@@ -6,7 +6,10 @@ use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use App\Http\Controllers\Api\FiscalController;
 use App\Http\Controllers\AgendaController;
-use App\Http\Controllers\Api\AtendimentoController; 
+use App\Http\Controllers\Api\AtendimentoController;
+use App\Http\Controllers\Api\LocationController;
+use App\Http\Controllers\Api\HomeController;
+
 
 Route::middleware('api')->group(function () {
 
@@ -29,13 +32,15 @@ Route::middleware('api')->group(function () {
     Route::get('/atendimentos', [AtendimentoController::class, 'index']);
     Route::get('/atendimentos/{id}', [AtendimentoController::class, 'show']);
     // Rota para listar todos os usuários que são Fiscais
-    
+
     // Rota para buscar a agenda de um fiscal específico
     Route::get('/fiscais/{id}/agenda', [FiscalController::class, 'showAgenda']);
-    
+
     // Rota para salvar um novo agendamento (o POST do seu formulário)
     // ...outras rotas protegidas
     Route::get('/fiscais', [FiscalController::class, 'index']);
+    Route::post('/location', [LocationController::class, 'store']);
+    Route::get('/home-data', [HomeController::class, 'index']);
 });
     Route::post('/agenda', [AgendaController::class, 'store']);
 });
