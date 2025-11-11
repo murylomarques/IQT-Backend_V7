@@ -17,13 +17,18 @@ return [
         'sanctum/csrf-cookie',
         'login',
         'logout',
+        'storage/*'
     ],
 
     'allowed_methods' => ['*'],
 
     // Se quiser liberar só para o domínio do seu frontend:
     // 'allowed_origins' => ['http://localhost:3000', 'https://seusite.com'],
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'https://iqt.desktop.com.br'
+    ],
 
     'allowed_origins_patterns' => [],
 

@@ -7,26 +7,41 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+// ==========================================================
+// ================ IMPORTAÇÕES QUE FALTAVAM ================
+// ==========================================================
+use App\Models\Cargo;
+use App\Models\Empresa;
+// ==========================================================
+
 
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
     /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
+     * Os atributos que podem ser atribuídos em massa.
+     * CORRIGIDO para corresponder à sua migration.
      */
     protected $fillable = [
-        'name',
+        'nome', // Corrigido de 'name' para 'nome'
         'email',
         'password',
+        'numero',
+        'cpf',
+        'cadastro_completo',
+        'imagem_perfil',
+        'supervisor_id',
+        'status',
+        'empresa_id',
+        'cargo_id',
+        'regional_id',
     ];
 
     /**
      * The attributes that should be hidden for serialization.
-     *
-     * @var array<int, string>
      */
     protected $hidden = [
         'password',
@@ -35,15 +50,27 @@ class User extends Authenticatable
 
     /**
      * The attributes that should be cast.
-     *
-     * @var array<string, string>
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
     ];
-     public function cargo()
+
+    /**
+     * Relação: um Usuário pertence a um Cargo.
+     */
+    public function cargo(): BelongsTo
     {
         // O Laravel vai procurar a chave estrangeira 'cargo_id' na tabela 'users'
         return $this->belongsTo(Cargo::class);
     }
+
+    /**
+     * Relação: um Usuário pertence a uma Empresa.
+     */
+    public function empresa(): BelongsTo
+    {
+        return $this->belongsTo(Empresa::class, 'empresa_id');
+    }
+
+    // Você pode adicionar outras relações aqui, como supervisor e regional, se precisar.
 }

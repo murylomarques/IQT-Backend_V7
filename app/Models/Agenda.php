@@ -57,4 +57,13 @@ class Agenda extends Model
     {
         return $this->belongsTo(BaseSalesforceIntegrada::class, 'original_atendimento_id');
     }
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array
+     */
+    protected $casts = [
+        'data_agendamento' => 'date', // ou 'datetime' se incluir a hora
+        'hora_agendamento' => 'datetime:H:i', // Para tratar a hora corretamente
+    ];
 }

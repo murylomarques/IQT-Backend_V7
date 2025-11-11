@@ -18,7 +18,8 @@ class DatabaseSeeder extends Seeder
             CargoSeeder::class,
             RegionalSeeder::class, // Mantido do exemplo anterior para a tabela users funcionar
             UserSeeder::class,
-            AgendaSeeder::class,    // Seeder de usuários para popular com exemplos
+            AgendaSeeder::class, 
+            BaseSalesforceIntegradaSeeder::class,   // Seeder de usuários para popular com exemplos
         ]);
     }
 }

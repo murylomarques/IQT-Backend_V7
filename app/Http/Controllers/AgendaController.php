@@ -8,6 +8,9 @@ use App\Models\BaseSalesforceIntegrada;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator; // Para validação mais robusta
 use Illuminate\Support\Facades\DB; 
+use Illuminate\Support\Facades\Auth; // Para pegar o usuário logado              // Seu model da tabela 'agenda'
+use Carbon\Carbon;   
+use App\Models\User;
 
 class AgendaController extends Controller
 {
@@ -104,16 +107,19 @@ class AgendaController extends Controller
         ], status: 201);
     }
 
-    /**
-     * Exibe um agendamento específico.
-     * GET /api/agenda/{agenda}
+     /**
+     * Exibe os detalhes de um agendamento específico.
+     *
+     * @param  \App\Models\Agenda  $agenda O agendamento encontrado automaticamente pelo ID na URL.
+     * @return \Illuminate\Http\Response
      */
     public function show(Agenda $agenda)
     {
-        // Carrega o agendamento junto com os dados do fiscal
-        return response()->json($agenda->load('fiscal'));
+        // O "Route Model Binding" do Laravel já encontra o agendamento pelo ID.
+        // Se não encontrar, ele retorna um 404 automaticamente.
+        // Nós apenas retornamos o resultado como JSON.
+        return response()->json($agenda);
     }
-
     /**
      * Atualiza um agendamento existente no banco de dados.
      * PUT/PATCH /api/agenda/{agenda}
@@ -150,4 +156,63 @@ class AgendaController extends Controller
         $agenda->delete();
         return response()->json(['message' => 'Agendamento cancelado/removido com sucesso.'], 200);
     }
+
+     /**
+     * Retorna as vistorias agendadas para o fiscal autenticado para a data de hoje.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function minhasVistoriasHoje(Request $request)
+    {
+        // 1. Pega o ID do usuário (fiscal) que está autenticado
+        $fiscalId = Auth::id();
+
+        // 2. Busca na tabela 'agenda' as vistorias que:
+        //    - Pertencem ao fiscal logado (fiscal_id)
+        //    - A data_agendamento é a data de hoje
+        $vistorias = Agenda::where('fiscal_id', $fiscalId)
+                           ->whereDate('data_agendamento', Carbon::today())
+                           ->orderBy('hora_agendamento', 'asc') // Opcional: ordena por hora
+                           ->get();
+
+        // 3. Retorna os resultados encontrados como uma resposta JSON
+        return response()->json($vistorias);
+    }
+
+     public function gantt(Request $request)
+    {
+        // Valida se uma data foi enviada, se não, usa a data de hoje
+        $request->validate(['date' => 'nullable|date_format:Y-m-d']);
+        $date = $request->input('date') ? Carbon::parse($request->input('date')) : Carbon::today();
+
+        // Busca todos os usuários que são Fiscais (ex: cargo_id = 3)
+        $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get();
+
+        // Busca todos os agendamentos para a data especificada
+        $agendamentos = Agenda::whereDate('data_agendamento', $date)
+            ->with('fiscal:id,nome') // Carrega a relação com o fiscal
+            ->get();
+            
+        return response()->json([
+            'resources' => $fiscais,
+            'tasks' => $agendamentos,
+        ]);
+    }
+
+    /**
+     * Atualiza um agendamento a partir do Drag and Drop no Gantt.
+     */
+    public function updateGantt(Request $request, Agenda $agenda)
+    {
+        $validated = $request->validate([
+            'fiscal_id' => 'sometimes|required|exists:users,id',
+            'hora_agendamento' => 'sometimes|required|date_format:H:i',
+        ]);
+
+        $agenda->update($validated);
+
+        return response()->json($agenda);
+    }
+
 }
