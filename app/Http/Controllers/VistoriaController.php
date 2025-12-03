@@ -111,6 +111,7 @@ class VistoriaController extends Controller
                 'regional' => $vistoria->fiscal?->empresa?->nome ?? 'N/A',
                 'empresa' => $vistoria->fiscal?->empresa?->nome ?? 'N/A',
                 'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
+                'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
                 'supervisor' => 'N/A',
                 'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
                 'data' => $dataLaudo,
