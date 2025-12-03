@@ -99,7 +99,7 @@ class VistoriaController extends Controller
             });
         }
 
-        $vistorias = $query->with(['fiscal:id,nome,empresa_id', 'fiscal.empresa:id,nome', 'agenda:id,numero_compromisso,created_at'])->latest()->get();
+        $vistorias = $query->with(['fiscal:id,nome,empresa_id', 'fiscal.empresa:id,nome', 'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at'])->latest()->get();
 
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at->toDateString();
