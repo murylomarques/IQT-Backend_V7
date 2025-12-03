@@ -15,19 +15,19 @@ class AtendimentoController extends Controller
     /**
      * Exibe uma lista paginada e filtrada de atendimentos.
      */
-    public function index(Request $request)
+    public function index(Request $request) 
     {
         // ===================================================================
-        // PASSO 1: CALCULAR AS ESTATÍSTICAS GLOBAIS (Sem alterações)
+        // PASSO 1: CALCULAR AS ESTATÍSTICAS GLOBAIS
         // ===================================================================
         $today = Carbon::today();
 
         $totalAgendamentos = Agenda::count();
         $pendentesHoje = Agenda::whereDate('data_agendamento', $today)
-                               ->where('statusAgendamento', 'pendente')
-                               ->count();
+                            ->where('statusAgendamento', 'pendente')
+                            ->count();
         $totalConcluidos = Agenda::where('statusAgendamento', 'concluido')
-                                 ->count();
+                                ->count();
 
         $globalStats = [
             'total_agendamentos' => $totalAgendamentos,
@@ -36,10 +36,12 @@ class AtendimentoController extends Controller
         ];
 
         // ===================================================================
-        // PASSO 2: CALCULAR AS ESTATÍSTICAS POR FISCAL (Sem alterações)
+        // PASSO 2: ESTATÍSTICAS POR FISCAL
         // ===================================================================
+        // Busca apenas usuários com cargo fiscal
         $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get(); 
 
+        // Otimização: Faz uma única query agrupada para contar status
         $agendaCounts = Agenda::query()
             ->select(
                 'fiscal_id',
@@ -51,6 +53,7 @@ class AtendimentoController extends Controller
             ->get()
             ->keyBy('fiscal_id');
 
+        // Mapeia os resultados para o formato esperado
         $fiscaisStats = $fiscais->map(function ($fiscal) use ($agendaCounts) {
             $stats = $agendaCounts->get($fiscal->id);
             return [
@@ -61,20 +64,22 @@ class AtendimentoController extends Controller
         });
 
         // ===================================================================
-        // PASSO 3: BUSCAR OS ATENDIMENTOS PENDENTES (Sem alterações)
+        // PASSO 3: BUSCAR OS ATENDIMENTOS (TUDO DE UMA VEZ)
         // ===================================================================
-        $perPage = 20;
         $query = BaseSalesforceIntegrada::query();
 
+        // Filtros
         if ($request->filled('tecnico')) {
             $query->where('nome_tecnico', 'like', '%' . $request->query('tecnico') . '%');
         }
         if ($request->filled('empresa')) {
             $query->where('empresa_tecnico', 'like', '%' . $request->query('empresa') . '%');
         }
-        // ... (resto dos seus filtros)
 
-        $atendimentosPaginados = $query->select(
+        // AQUI ESTÁ A MUDANÇA PRINCIPAL:
+        // Usamos ->get() para trazer TODOS os registros de uma vez.
+        // Não usamos paginate() nem limit().
+        $atendimentos = $query->select(
             'id as ID',
             DB::raw("NULL as Regional"),
             'empresa_tecnico as Empresa',
@@ -83,29 +88,27 @@ class AtendimentoController extends Controller
             'nome_conta as Cliente',
             'telefone as Telefone',
             'caso as SA',
+            'numero_compromisso as NumeroCompromisso',
             'data_sa_concluida as Conclusao',
             'endereco as Endereco',
             'cto as CTO',
             'porta as Porta'
-        )
-        ->paginate($perPage)
-        ->withQueryString();
+        )->get(); 
 
         // ===================================================================
-        // PASSO 4: COMBINAR TUDO EM UMA ÚNICA RESPOSTA (NOVA ABORDAGEM)
+        // PASSO 4: MONTAR RESPOSTA (MANTENDO ESTRUTURA PARA O FRONT)
         // ===================================================================
-        
-        // 1. Converte o resultado da paginação em um array.
-        //    Isso nos dá 'data', 'current_page', 'total', etc.
-        $responseArray = $atendimentosPaginados->toArray();
-
-        // 2. Adiciona a nossa chave 'stats' a este array.
-        $responseArray['stats'] = [
-            'global' => $globalStats,
-            'fiscais' => $fiscaisStats,
+        // O front receberá exatamente as chaves 'data' e 'stats' como espera.
+        // A diferença é que 'data' agora conterá milhares de linhas se existirem,
+        // em vez de apenas 20.
+        $responseArray = [
+            'data' => $atendimentos,
+            'stats' => [
+                'global' => $globalStats,
+                'fiscais' => $fiscaisStats,
+            ]
         ];
 
-        // 3. Retorna o array completo como uma resposta JSON.
         return response()->json($responseArray);
     }
 

@@ -82,6 +82,7 @@ class AgendaController extends Controller
                     'nome_conta'              => $atendimentoOriginal->nome_conta,
                     'endereco'                => $atendimentoOriginal->endereco,
                     'telefone'                => $atendimentoOriginal->telefone,
+                    'territorio'              => $atendimentoOriginal->TERRITORIO_A,
                 ]);
 
                 // PASSO 3: APAGA o registro original da tabela 'base_salesforce_integrada'.

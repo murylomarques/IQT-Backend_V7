@@ -40,6 +40,7 @@ class Agenda extends Model
         'nome_conta',
         'endereco',
         'telefone',
+        'territorio',
     ];
 
     /**
