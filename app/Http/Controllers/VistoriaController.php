@@ -109,7 +109,7 @@ class VistoriaController extends Controller
             return [
                 'id' => $vistoria->id,
                 'regional' => $vistoria->fiscal?->empresa?->nome ?? 'N/A',
-                'empresa' => $vistoria->fiscal?->empresa?->nome ?? 'N/A',
+                'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
                 'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
                 'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
                 'supervisor' => 'N/A',
