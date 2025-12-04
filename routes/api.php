@@ -43,7 +43,7 @@ Route::middleware('api')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vistorias/ids-por-periodo', [VistoriaController::class, 'getIdsByDateRange']);
         Route::get('/atendimentos', [AtendimentoController::class, 'index']);
-        Route::get('/atendimentos/{id}', [AtendimentoController::class, 'show']);\
+        Route::get('/atendimentos/{id}', [AtendimentoController::class, 'show']);
         Route::get('/fiscais/{id}/agenda', [FiscalController::class, 'showAgenda']);
         Route::get('/fiscais', [FiscalController::class, 'index']);
         Route::post('/location', [LocationController::class, 'store']);
