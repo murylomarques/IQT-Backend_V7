@@ -17,7 +17,8 @@ use App\Http\Controllers\RegionalController;
 use App\Http\Controllers\CargoController;
 use App\Http\Controllers\VistoriaSegurancaController;
 use App\Http\Controllers\ExportController;
-
+use App\Http\Controllers\FcaController;
+use App\Http\Controllers\FcaRegistroController;
 
 
 Route::middleware('api')->group(function () {
@@ -42,7 +43,7 @@ Route::middleware('api')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vistorias/ids-por-periodo', [VistoriaController::class, 'getIdsByDateRange']);
         Route::get('/atendimentos', [AtendimentoController::class, 'index']);
-        Route::get('/atendimentos/{id}', [AtendimentoController::class, 'show']);
+        Route::get('/atendimentos/{id}', [AtendimentoController::class, 'show']);\
         Route::get('/fiscais/{id}/agenda', [FiscalController::class, 'showAgenda']);
         Route::get('/fiscais', [FiscalController::class, 'index']);
         Route::post('/location', [LocationController::class, 'store']);
@@ -76,7 +77,7 @@ Route::middleware('api')->group(function () {
         Route::apiResource('empresas', EmpresaController::class);
         Route::apiResource('regionais', RegionalController::class);
         Route::post('/vistorias-seguranca', [VistoriaSegurancaController::class, 'store']);
-        
+         Route::post('/vistorias-seguranca/{vistoria}/upload', [VistoriaSegurancaController::class, 'upload']);
             Route::post('/vistorias', [VistoriaController::class, 'store']);
 
         Route::get('/vistorias/{vistoria}/data-pdf', [VistoriaController::class, 'dataForPdf']);
@@ -87,4 +88,19 @@ Route::middleware('api')->group(function () {
     
     Route::post('/agenda', [AgendaController::class, 'store']);
     Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
+
+    Route::post('/loginfca', [FcaController::class, 'login']);
+    Route::post('/fca/usuario', [FcaController::class, 'criarUsuario']);
+    Route::get('/fca/registros', [FcaRegistroController::class, 'index']);
+    Route::post('/fca/registros', [FcaRegistroController::class, 'store']);
+    Route::put('/fca/registros/{id}', [FcaRegistroController::class, 'update']);
+    Route::delete('/fca/registros/{id}', [FcaRegistroController::class, 'destroy']);
+    Route::get('/fca/registros/coordenador', [FcaRegistroController::class, 'indexCoordenador']);
+    Route::get('/fca/registros/all', [FcaRegistroController::class, 'indexAll']);
+    Route::get('/fca/users', [FcaController::class, 'indexUsers']); 
+    Route::put('fca/users/{userId}', [FcaController::class, 'updateUser']); 
+
+    Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
+
 });
+ 

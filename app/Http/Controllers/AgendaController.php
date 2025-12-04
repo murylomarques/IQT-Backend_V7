@@ -158,6 +158,7 @@ class AgendaController extends Controller
         return response()->json(['message' => 'Agendamento cancelado/removido com sucesso.'], 200);
     }
 
+
      /**
      * Retorna as vistorias agendadas para o fiscal autenticado para a data de hoje.
      *
