@@ -61,8 +61,6 @@ class VistoriaSegurancaController extends Controller
             'escada_bom_estado' => 'required|in:Sim,Não',
 
             // Arquivos e Observações
-            'arquivos' => 'required|array|min:1',
-            'arquivos.*' => 'file|mimes:jpg,jpeg,png,pdf|max:5120',
             'observacoes' => 'nullable|string',
         ]);
 
