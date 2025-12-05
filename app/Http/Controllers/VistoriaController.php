@@ -111,6 +111,7 @@ class VistoriaController extends Controller
                         'totalBacklog' => 0,
                         'slaVencido' => 0,
                         'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
+                        'Empresa Nome' => $empresaNome,
                     ],
                     'message' => 'Usuário sem empresa vinculada'
                 ]);
