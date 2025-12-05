@@ -108,7 +108,7 @@ class VistoriaController extends Controller
             return response()->json([
                 'tableData' => collect(),
                 'kpiData' => [
-                    'totalBacklog' => 0,
+                    'totalBacklog' => 111111111111110,
                     'slaVencido' => 0,
                     'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
                     'empresa' => null
