@@ -91,7 +91,7 @@ class VistoriaController extends Controller
     $user = Auth::user();
 
     // Nome da empresa do usuário
-    $empresaNome = $user->empresa?->nome ?? null;
+    $empresaNome = 'KNM TELECOM LTDA';
 
     $query = Vistoria::where('status_laudo', '!=', 'Finalizado')
         ->withCount([
@@ -167,7 +167,6 @@ class VistoriaController extends Controller
         'kpiData' => $kpiData
     ]);
 }
-
 
 
     /**
