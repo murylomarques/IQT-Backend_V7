@@ -156,6 +156,7 @@ class VistoriaController extends Controller
             'totalBacklog' => $formattedData->count(),
             'slaVencido' => $formattedData->where('sla', 'Vencido')->count(),
             'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
+            'Empresa Nome' => $empresaNome,
         ];
 
         return response()->json([
