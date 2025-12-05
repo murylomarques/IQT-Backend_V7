@@ -99,38 +99,54 @@ class VistoriaSegurancaController extends Controller
 
       
     }
-     public function upload(Request $request, VistoriaSeguranca $vistoria)
+    public function upload(Request $request, VistoriaSeguranca $vistoria)
     {
-        // Validação focada apenas no upload de UM arquivo
         $validator = Validator::make($request->all(), [
-            'arquivo' => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120',
+            'arquivo' => 'required|string', // Base64
         ]);
 
         if ($validator->fails()) {
             return response()->json($validator->errors(), 422);
         }
-        
-        // Garante que o usuário logado é o mesmo que criou a vistoria
+
         if ($vistoria->inspetor_id != Auth::id()) {
             return response()->json(['message' => 'Não autorizado a adicionar arquivos a esta vistoria.'], 403);
         }
 
         try {
-            if ($request->hasFile('arquivo')) {
-                $file = $request->file('arquivo');
-                $path = $file->store('vistorias_seguranca', 'public');
-                
-                // Associa o arquivo à vistoria que o Laravel carregou a partir do ID na URL
-                $vistoria->arquivos()->create(['path' => $path]);
+
+            $base64 = $request->arquivo;
+
+            // remove prefixo tipo "data:image/jpeg;base64,"
+            if (str_contains($base64, ',')) {
+                [$meta, $fileData] = explode(',', $base64);
             } else {
-                // Caso a requisição chegue sem o arquivo por algum motivo
-                return response()->json(['message' => 'Nenhum arquivo recebido.'], 400);
+                $fileData = $base64;
             }
+
+            $fileData = base64_decode($fileData);
+
+            // Detectar extensão pela metadata
+            $extension = 'jpg';
+            if (str_contains($meta, 'png')) $extension = 'png';
+            if (str_contains($meta, 'pdf')) $extension = 'pdf';
+            if (str_contains($meta, 'jpeg')) $extension = 'jpeg';
+
+            // Nome do arquivo
+            $filename = uniqid('vistoria_') . '.' . $extension;
+
+            // Salvar no storage
+            $path = "vistorias_seguranca/$filename";
+            Storage::disk('public')->put($path, $fileData);
+
+            // Salvar no banco
+            $vistoria->arquivos()->create(['path' => $path]);
+
             return response()->json(['message' => 'Arquivo enviado com sucesso.', 'path' => $path], 200);
 
         } catch (\Exception $e) {
-            Log::error("Erro no upload para a vistoria ID {$vistoria->id}: " . $e->getMessage());
-            return response()->json(['message' => 'Ocorreu um erro interno durante o upload do arquivo.'], 500);
+            Log::error("Erro upload base64 → {$e->getMessage()}");
+            return response()->json(['message' => 'Erro interno no upload.'], 500);
         }
     }
 
