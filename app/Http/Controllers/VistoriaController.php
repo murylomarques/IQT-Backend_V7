@@ -90,45 +90,77 @@ class VistoriaController extends Controller
     {
         $user = Auth::user();
 
-        // Filtra vistorias que estão com o laudo "Em Correção"
-         $query = Vistoria::where('status_laudo', '!=', 'Finalizado');
+        // Pega o nome da empresa do usuário via relação empresa()
+        $empresaNome = $user->empresa?->nome ?? null;
 
-        if ($user->cargo_id != 1) { // Apenas Admins veem tudo
-            $query->whereHas('fiscal', function ($q) use ($user) {
-                $q->where('empresa_id', $user->empresa_id);
+        $query = Vistoria::where('status_laudo', '!=', 'Finalizado')
+            ->withCount([
+                'checklistItens as itens_reprovados' => function ($q) {
+                    $q->where('status_correcao', 'Reprovado');
+                }
+            ]);
+
+        // Se não for administrador, filtra pelas vistorias cuja agenda.empresa_tecnico
+        // seja igual ao nome da empresa do usuário
+        if ($user->cargo_id != 1) {
+            // Se o usuário não tem empresa vinculada, retorna array vazio (evita mostrar tudo)
+            if (!$empresaNome) {
+                return response()->json([
+                    'tableData' => collect(),
+                    'kpiData' => [
+                        'totalBacklog' => 0,
+                        'slaVencido' => 0,
+                        'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
+                    ],
+                    'message' => 'Usuário sem empresa vinculada'
+                ]);
+            }
+
+            // Filtro simples: empresa_tecnico deve ser igual ao nome da empresa do usuário
+            $query->whereHas('agenda', function ($q) use ($empresaNome) {
+                $q->where('empresa_tecnico', $empresaNome);
             });
         }
 
-        $vistorias = $query->with(['fiscal:id,nome,empresa_id', 'fiscal.empresa:id,nome', 'agenda:id,numero_compromisso,empresa_tecnico,territorio,nome_tecnico,created_at'])->latest()->get();
+        // Carrega agenda incluindo empresa_tecnico pra evitar "N/A"
+        $vistorias = $query->with([
+            'fiscal:id,nome,empresa_id',
+            'fiscal.empresa:id,nome',
+            'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at'
+        ])->latest()->get();
 
         $formattedData = $vistorias->map(function ($vistoria) {
-            $dataLaudo = $vistoria->created_at->toDateString();
-            $dataSla = $vistoria->created_at->addDays(5)->toDateString();
-            $slaStatus = now()->gt($dataSla) ? 'Vencido' : 'No Prazo';
+            $dataLaudo = $vistoria->created_at?->toDateString();
+            $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
+            $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5))) ? 'Vencido' : 'No Prazo';
 
             return [
                 'id' => $vistoria->id,
-                'regional' => $vistoria->fiscal?->empresa?->nome ?? 'N/A',
+                // pega da agenda (empresa do técnico, conforme você pediu)
+                'regional' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
                 'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
                 'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
-                'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
-                'tecnico' => $vistoria->agenda?->nome_tecnico ?? 'N/A',
                 'supervisor' => 'N/A',
                 'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
+                'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
                 'data' => $dataLaudo,
                 'dataSla' => $dataSla,
                 'sla' => $slaStatus,
-                'statusLaudo' => $vistoria->status_laudo, // Usando o status real da vistoria
+                'statusLaudo' => $vistoria->status_laudo,
+                'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0
             ];
         });
 
         $kpiData = [
             'totalBacklog' => $formattedData->count(),
             'slaVencido' => $formattedData->where('sla', 'Vencido')->count(),
-            'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(), // Exemplo de KPI de concluídos
+            'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
         ];
 
-        return response()->json(['tableData' => $formattedData, 'kpiData' => $kpiData]);
+        return response()->json([
+            'tableData' => $formattedData,
+            'kpiData' => $kpiData
+        ]);
     }
 
     /**
