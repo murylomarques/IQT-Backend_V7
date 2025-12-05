@@ -91,7 +91,7 @@ class VistoriaController extends Controller
     $user = Auth::user();
 
     // Nome da empresa do usuário
-    $empresaNome = 'KNM TELECOM LTDA';
+    $empresaNome = $user->empresa?->nome ?? null;
 
     $query = Vistoria::where('status_laudo', '!=', 'Finalizado')
         ->withCount([
@@ -131,7 +131,7 @@ class VistoriaController extends Controller
     $vistorias = $query->with([
         'fiscal:id,nome,empresa_id',
         'fiscal.empresa:id,nome',
-        'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at'
+        'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at,nome_tecnico,city'
     ])->latest()->get();
 
     // Formatar tabela
@@ -147,6 +147,8 @@ class VistoriaController extends Controller
             'regional' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
             'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
             'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
+            'tecnico' => $vistoria->agenda?->nome_tecnico, 
+            'cidade' => $vistoria->agenda?->city, 
             'supervisor' => 'N/A',
             'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
             'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
