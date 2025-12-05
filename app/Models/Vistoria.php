@@ -26,9 +26,9 @@ class Vistoria extends Model
         return $this->belongsTo(User::class, 'fiscal_id');
     }
 
-    public function agenda(): BelongsTo
+    public function agenda()
     {
-        return $this->belongsTo(Agenda::class, 'agenda_id');
+        return $this->belongsTo(Agenda::class, 'agenda_id', 'id');
     }
 
 

@@ -169,6 +169,7 @@ class VistoriaController extends Controller
 }
 
 
+
     /**
      * Exibe os detalhes de uma vistoria específica.
      */
