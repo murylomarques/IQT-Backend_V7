@@ -119,8 +119,12 @@ class VistoriaController extends Controller
 
         // FILTRA vistorias da empresa do usuário
         $query->whereHas('agenda', function ($q) use ($empresaNome) {
-            $q->where('empresa_tecnico', $empresaNome);
-        });
+    $q->whereRaw("
+        LOWER(REPLACE(TRIM(empresa_tecnico), ' ', ''))
+        =
+        LOWER(REPLACE(TRIM(?), ' ', ''))
+    ", [$empresaNome]);
+});
     }
 
     // Carrega dados
