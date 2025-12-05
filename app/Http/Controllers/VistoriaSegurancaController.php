@@ -99,4 +99,39 @@ class VistoriaSegurancaController extends Controller
 
       
     }
+     public function upload(Request $request, VistoriaSeguranca $vistoria)
+    {
+        // Validação focada apenas no upload de UM arquivo
+        $validator = Validator::make($request->all(), [
+            'arquivo' => 'required|file|mimes:jpg,jpeg,png,pdf|max:5120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 422);
+        }
+        
+        // Garante que o usuário logado é o mesmo que criou a vistoria
+        if ($vistoria->inspetor_id != Auth::id()) {
+            return response()->json(['message' => 'Não autorizado a adicionar arquivos a esta vistoria.'], 403);
+        }
+
+        try {
+            if ($request->hasFile('arquivo')) {
+                $file = $request->file('arquivo');
+                $path = $file->store('vistorias_seguranca', 'public');
+                
+                // Associa o arquivo à vistoria que o Laravel carregou a partir do ID na URL
+                $vistoria->arquivos()->create(['path' => $path]);
+            } else {
+                // Caso a requisição chegue sem o arquivo por algum motivo
+                return response()->json(['message' => 'Nenhum arquivo recebido.'], 400);
+            }
+            return response()->json(['message' => 'Arquivo enviado com sucesso.', 'path' => $path], 200);
+
+        } catch (\Exception $e) {
+            Log::error("Erro no upload para a vistoria ID {$vistoria->id}: " . $e->getMessage());
+            return response()->json(['message' => 'Ocorreu um erro interno durante o upload do arquivo.'], 500);
+        }
+    }
+
 }
