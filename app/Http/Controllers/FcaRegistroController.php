@@ -185,7 +185,7 @@ class FcaRegistroController extends Controller
                 'fato' => $registro->fato,
                 'causa' => $registro->causa,
                 'acao' => $registro->acao, 
-                'senha' => $registro->acao, 
+                'status' => $registro->status, 
                 'responsavel' => $registro->responsavel,
                 'data_inicio' => $registro->data_inicio,
                 'data_fim' => $registro->data_fim,
