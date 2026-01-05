@@ -12,6 +12,9 @@ use Illuminate\Support\Facades\Auth; // Para pegar o usuário logado            
 use Carbon\Carbon;   
 use App\Models\User;
 
+use App\Models\Vistoria;
+use App\Models\VistoriaChecklistItem;
+
 class AgendaController extends Controller
 {
     /**
@@ -158,7 +161,6 @@ class AgendaController extends Controller
         return response()->json(['message' => 'Agendamento cancelado/removido com sucesso.'], 200);
     }
 
-
      /**
      * Retorna as vistorias agendadas para o fiscal autenticado para a data de hoje.
      *
@@ -205,16 +207,94 @@ class AgendaController extends Controller
     /**
      * Atualiza um agendamento a partir do Drag and Drop no Gantt.
      */
-    public function updateGantt(Request $request, Agenda $agenda)
+     public function updateGantt(Request $request, Agenda $agenda)
     {
         $validated = $request->validate([
-            'fiscal_id' => 'sometimes|required|exists:users,id',
+            'data_agendamento' => 'sometimes|required|date_format:Y-m-d',
+            'fiscal_id'        => 'sometimes|required|exists:users,id',
             'hora_agendamento' => 'sometimes|required|date_format:H:i',
         ]);
 
-        $agenda->update($validated);
+        try {
+            // Inicia uma transação para garantir a integridade dos dados
+            DB::transaction(function () use ($agenda, $validated) {
+
+                // PASSO 1: Encontrar a vistoria associada a esta agenda manualmente.
+                $vistoria = Vistoria::where('agenda_id', $agenda->id)->first();
+
+                // PASSO 2: Se uma vistoria for encontrada, remover seus filhos e depois ela mesma.
+                if ($vistoria) {
+                    // Primeiro, remove todos os itens do checklist associados a essa vistoria.
+                    // Isso evita que fiquem registros "órfãos" no banco de dados.
+                    VistoriaChecklistItem::where('vistoria_id', $vistoria->id)->delete();
+
+                    // Agora, remove a vistoria principal.
+                    $vistoria->delete();
+                }
+
+                // PASSO 3: Preparar os dados para a atualização da agenda.
+                // Mesclamos os dados validados da requisição com os status resetados.
+                $updateData = array_merge($validated, [
+                    'status'            => 'Agendado',
+                    'statusAgendamento' => 'Pendente',
+                    'statusLaudo'       => 'Pendente',
+                ]);
+
+                // PASSO 4: Atualizar o agendamento com os novos dados.
+                $agenda->update($updateData);
+
+            }); // A transação é concluída com sucesso aqui (commit).
+
+        } catch (\Exception $e) {
+            // Se qualquer etapa dentro da transação falhar, tudo é revertido (rollback)
+            // e retornamos uma mensagem de erro.
+            return response()->json([
+                'message' => 'Ocorreu um erro ao reagendar a vistoria.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+
+        // Recarrega a relação com o fiscal para garantir que o nome esteja atualizado na resposta
+        $agenda->load('fiscal');
 
         return response()->json($agenda);
     }
+
+
+     /**
+     * Remove todos os agendamentos de um fiscal (usuário) específico.
+     * Usado para limpar a agenda de um fiscal no Gantt, por exemplo.
+     * DELETE /agenda-gantt/{userId}
+     *
+     * @param int $userId O ID do usuário (fiscal) cujos agendamentos serão removidos.
+     * @return \Illuminate\Http\Response
+     */
+    public function destroyUserSchedule($userId)
+    {
+        // Validação para garantir que o usuário existe (opcional, mas recomendado)
+        $user = User::find($userId);
+
+        if (!$user) {
+            return response()->json(['message' => 'Usuário (fiscal) não encontrado.'], 404);
+        }
+
+        // Deleta todos os registros da tabela 'agendas' onde o 'fiscal_id' corresponde ao ID fornecido.
+        // O método delete() em uma query builder retorna o número de linhas afetadas.
+        $deletedCount = Agenda::where('fiscal_id', $userId)->delete();
+
+        // Retorna uma resposta de sucesso, informando quantos itens foram removidos.
+        if ($deletedCount > 0) {
+            return response()->json([
+                'message' => "Operação concluída. {$deletedCount} agendamento(s) do usuário foram removidos."
+            ], 200);
+        }
+
+        // Se nenhum agendamento foi encontrado para aquele usuário
+        return response()->json([
+            'message' => 'Nenhum agendamento encontrado para este usuário. Nenhuma ação foi necessária.'
+        ], 200);
+    }
+
+
 
 }

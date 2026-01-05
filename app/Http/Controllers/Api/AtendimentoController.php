@@ -16,101 +16,93 @@ class AtendimentoController extends Controller
      * Exibe uma lista paginada e filtrada de atendimentos.
      */
     public function index(Request $request) 
-    {
-        // ===================================================================
-        // PASSO 1: CALCULAR AS ESTATÍSTICAS GLOBAIS
-        // ===================================================================
-        $today = Carbon::today();
+{
+    // ===================================================================
+    // PASSO 1: CALCULAR AS ESTATÍSTICAS GLOBAIS
+    // ===================================================================
+    $today = Carbon::today();
 
-        $totalAgendamentos = Agenda::count();
-        $pendentesHoje = Agenda::whereDate('data_agendamento', $today)
-                            ->where('statusAgendamento', 'pendente')
-                            ->count();
-        $totalConcluidos = Agenda::where('statusAgendamento', 'concluido')
-                                ->count();
+    $totalAgendamentos = Agenda::count();
+    $pendentesHoje = Agenda::whereDate('data_agendamento', $today)
+                           ->where('statusAgendamento', 'pendente')
+                           ->count();
+    $totalConcluidos = Agenda::where('statusAgendamento', 'concluido')
+                             ->count();
 
-        $globalStats = [
-            'total_agendamentos' => $totalAgendamentos,
-            'pendentes_hoje' => $pendentesHoje,
-            'total_concluidos' => $totalConcluidos,
+    $globalStats = [
+        'total_agendamentos' => $totalAgendamentos,
+        'pendentes_hoje' => $pendentesHoje,
+        'total_concluidos' => $totalConcluidos,
+    ];
+
+    // ===================================================================
+    // PASSO 2: ESTATÍSTICAS POR FISCAL
+    // ===================================================================
+    $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get(); 
+
+    $agendaCounts = Agenda::query()
+        ->select(
+            'fiscal_id',
+            DB::raw('COUNT(CASE WHEN DATE(data_agendamento) = ? THEN 1 END) as agendados_hoje'),
+            DB::raw('COUNT(CASE WHEN DATE(data_agendamento) > ? THEN 1 END) as agendados_futuro')
+        )
+        ->setBindings([$today->toDateString(), $today->toDateString()])
+        ->groupBy('fiscal_id')
+        ->get()
+        ->keyBy('fiscal_id');
+
+    $fiscaisStats = $fiscais->map(function ($fiscal) use ($agendaCounts) {
+        $stats = $agendaCounts->get($fiscal->id);
+        return [
+            'nome' => $fiscal->nome, 
+            'agendados_hoje' => $stats->agendados_hoje ?? 0,
+            'agendados_futuro' => $stats->agendados_futuro ?? 0,
         ];
+    });
 
-        // ===================================================================
-        // PASSO 2: ESTATÍSTICAS POR FISCAL
-        // ===================================================================
-        // Busca apenas usuários com cargo fiscal
-        $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get(); 
+    // ===================================================================
+    // PASSO 3: BUSCAR OS ATENDIMENTOS (SEM PAGINAÇÃO)
+    // ===================================================================
+    $query = BaseSalesforceIntegrada::query();
 
-        // Otimização: Faz uma única query agrupada para contar status
-        $agendaCounts = Agenda::query()
-            ->select(
-                'fiscal_id',
-                DB::raw('COUNT(CASE WHEN DATE(data_agendamento) = ? THEN 1 END) as agendados_hoje'),
-                DB::raw('COUNT(CASE WHEN DATE(data_agendamento) > ? THEN 1 END) as agendados_futuro')
-            )
-            ->setBindings([$today->toDateString(), $today->toDateString()])
-            ->groupBy('fiscal_id')
-            ->get()
-            ->keyBy('fiscal_id');
-
-        // Mapeia os resultados para o formato esperado
-        $fiscaisStats = $fiscais->map(function ($fiscal) use ($agendaCounts) {
-            $stats = $agendaCounts->get($fiscal->id);
-            return [
-                'nome' => $fiscal->nome, 
-                'agendados_hoje' => $stats->agendados_hoje ?? 0,
-                'agendados_futuro' => $stats->agendados_futuro ?? 0,
-            ];
-        });
-
-        // ===================================================================
-        // PASSO 3: BUSCAR OS ATENDIMENTOS (TUDO DE UMA VEZ)
-        // ===================================================================
-        $query = BaseSalesforceIntegrada::query();
-
-        // Filtros
-        if ($request->filled('tecnico')) {
-            $query->where('nome_tecnico', 'like', '%' . $request->query('tecnico') . '%');
-        }
-        if ($request->filled('empresa')) {
-            $query->where('empresa_tecnico', 'like', '%' . $request->query('empresa') . '%');
-        }
-
-        // AQUI ESTÁ A MUDANÇA PRINCIPAL:
-        // Usamos ->get() para trazer TODOS os registros de uma vez.
-        // Não usamos paginate() nem limit().
-        $atendimentos = $query->select(
-            'id as ID',
-            DB::raw("NULL as Regional"),
-            'empresa_tecnico as Empresa',
-            DB::raw("NULL as Supervisor"),
-            'nome_tecnico as Tecnico',
-            'nome_conta as Cliente',
-            'telefone as Telefone',
-            'caso as SA',
-            'numero_compromisso as NumeroCompromisso',
-            'data_sa_concluida as Conclusao',
-            'endereco as Endereco',
-            'cto as CTO',
-            'porta as Porta'
-        )->get(); 
-
-        // ===================================================================
-        // PASSO 4: MONTAR RESPOSTA (MANTENDO ESTRUTURA PARA O FRONT)
-        // ===================================================================
-        // O front receberá exatamente as chaves 'data' e 'stats' como espera.
-        // A diferença é que 'data' agora conterá milhares de linhas se existirem,
-        // em vez de apenas 20.
-        $responseArray = [
-            'data' => $atendimentos,
-            'stats' => [
-                'global' => $globalStats,
-                'fiscais' => $fiscaisStats,
-            ]
-        ];
-
-        return response()->json($responseArray);
+    if ($request->filled('tecnico')) {
+        $query->where('nome_tecnico', 'like', '%' . $request->query('tecnico') . '%');
     }
+    if ($request->filled('empresa')) {
+        $query->where('empresa_tecnico', 'like', '%' . $request->query('empresa') . '%');
+    }
+
+    $atendimentos = $query->select(
+        'id as ID',
+        DB::raw("NULL as Regional"),
+        'empresa_tecnico as Empresa',
+        DB::raw("NULL as Supervisor"),
+        'nome_tecnico as Tecnico',
+        'nome_conta as Cliente',
+        'telefone as Telefone',
+        'caso as SA',
+        'numero_compromisso as NumeroCompromisso',
+        'data_sa_concluida as Conclusao',
+        'endereco as Endereco',
+        'cto as CTO',
+        'porta as Porta'
+    )->get(); 
+
+    // ===================================================================
+    // PASSO 4: MONTAR RESPOSTA SEM PAGINAÇÃO
+    // ===================================================================
+    $responseArray = [
+        'data' => $atendimentos,
+        'stats' => [
+            'global' => $globalStats,
+            'fiscais' => $fiscaisStats,
+        ]
+    ];
+
+    return response()->json($responseArray);
+}
+
+
 
     /**
      * ==========================================================

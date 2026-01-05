@@ -8,13 +8,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Validator; // Adicione este import
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class VistoriaSegurancaController extends Controller
 {
     /**
-     * Armazena uma nova Vistoria de Segurança no banco de dados.
-     * Rota: POST /api/vistorias-seguranca
+     * Lista as vistorias existentes com base em um intervalo de datas.
      */
     public function index(Request $request)
     {
@@ -23,8 +23,7 @@ class VistoriaSegurancaController extends Controller
             'end_date' => 'required|date|after_or_equal:start_date',
         ]);
 
-        // MODIFICAÇÃO ESTÁ AQUI: Adicione .with('arquivos')
-        $vistorias = VistoriaSeguranca::with('arquivos') // <--- ADICIONE ESTA LINHA
+        $vistorias = VistoriaSeguranca::with('arquivos', 'inspetor', 'regional', 'empresa')
             ->whereBetween('created_at', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date . ' 23:59:59'
@@ -34,11 +33,15 @@ class VistoriaSegurancaController extends Controller
 
         return response()->json($vistorias);
     }
+
+    /**
+     * ETAPA 1: Cria um novo registro de Vistoria de Segurança SEM arquivos.
+     * Recebe os dados do formulário via JSON.
+     */
     public function store(Request $request)
     {
-        // 1. Validação de todos os campos do formulário
+        // Validação SEM a regra de arquivos, pois eles virão em outra requisição.
         $validator = Validator::make($request->all(), [
-            // Dados de Identificação
             'inspetor_id' => 'required|exists:users,id',
             'regional_id' => 'required|exists:regionais,id',
             'cidade' => 'required|string|max:255',
@@ -50,8 +53,6 @@ class VistoriaSegurancaController extends Controller
             'cpf_tecnico' => 'required|string|max:20',
             'nome_supervisor' => 'required|string|max:255',
             'placa' => 'required|string|max:15',
-
-            // Checklist de EPIs e Segurança
             'uso_capacete' => 'required|in:Sim,Não',
             'uso_cinto' => 'required|in:Sim,Não',
             'uso_talabarte' => 'required|in:Sim,Não',
@@ -60,8 +61,6 @@ class VistoriaSegurancaController extends Controller
             'escada_amarrada' => 'required|in:Sim,Não',
             'sinalizacao_cones' => 'required|in:Sim,Não',
             'escada_bom_estado' => 'required|in:Sim,Não',
-
-            // Arquivos e Observações
             'observacoes' => 'nullable|string',
         ]);
 
@@ -71,35 +70,27 @@ class VistoriaSegurancaController extends Controller
 
         $validatedData = $validator->validated();
 
-        // Garante que o usuário logado é o mesmo inspetor enviado
         if ($validatedData['inspetor_id'] != Auth::id()) {
             return response()->json(['message' => 'ID do inspetor inválido.'], 403);
         }
 
-        DB::beginTransaction();
-       
-            // ==========================================================
-            // ==================== A CORREÇÃO ESTÁ AQUI ==================
-            // ==========================================================
-            // Cria a vistoria usando todos os dados validados, EXCETO a chave 'arquivos'.
-            $vistoria = VistoriaSeguranca::create(
-                collect($validatedData)->except('arquivos')->toArray()
-            );
-            // ==========================================================
+        try {
+            // Cria a vistoria apenas com os dados de texto
+            $vistoria = VistoriaSeguranca::create($validatedData);
+            
+            // Retorna a vistoria criada, incluindo seu novo ID, para o frontend usar na Etapa 2
+            return response()->json($vistoria, 201);
 
-            // Processa e armazena cada arquivo enviado
-            if ($request->hasFile('arquivos')) {
-                foreach ($request->file('arquivos') as $file) {
-                    $path = $file->store('vistorias_seguranca', 'public');
-                    $vistoria->arquivos()->create(['path' => $path]);
-                }
-            }
-
-            DB::commit();
-            return response()->json($vistoria->load('arquivos'), 201);
-
-      
+        } catch (\Exception $e) {
+            Log::error('Erro ao criar registro de vistoria: ' . $e->getMessage());
+            return response()->json(['message' => 'Ocorreu um erro interno ao criar o registro da vistoria.'], 500);
+        }
     }
+
+    /**
+     * ETAPA 2: Faz o upload de um arquivo e o associa a uma vistoria existente.
+     * Recebe os dados via multipart/form-data.
+     */
     public function upload(Request $request, VistoriaSeguranca $vistoria)
     {
         $validator = Validator::make($request->all(), [

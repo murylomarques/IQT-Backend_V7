@@ -86,11 +86,11 @@ class VistoriaController extends Controller
     /**
      * Retorna a lista de vistorias com inconformidades para a tela de backlog.
      */
-    public function backlog(Request $request)
+public function backlog(Request $request)
 {
     $user = Auth::user();
 
-    // Nome da empresa do usuário
+    // Pega o nome da empresa do usuário via relação empresa()
     $empresaNome = $user->empresa?->nome ?? null;
 
     $query = Vistoria::where('status_laudo', '!=', 'Finalizado')
@@ -100,55 +100,46 @@ class VistoriaController extends Controller
             }
         ]);
 
-    // Se o usuário não é administrador (cargo_id != 1)
+    // Se não for administrador, filtra pelas vistorias cuja agenda.empresa_tecnico
+    // seja igual ao nome da empresa do usuário
     if ($user->cargo_id != 1) {
-
-        // Se não tiver empresa vinculada, retorna vazio
+        // Se o usuário não tem empresa vinculada, retorna array vazio (evita mostrar tudo)
         if (!$empresaNome) {
             return response()->json([
                 'tableData' => collect(),
                 'kpiData' => [
-                    'totalBacklog' => 111111111111110,
+                    'totalBacklog' => 0,
                     'slaVencido' => 0,
                     'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
-                    'empresa' => null
                 ],
                 'message' => 'Usuário sem empresa vinculada'
             ]);
         }
 
-        // FILTRA vistorias da empresa do usuário
+        // Filtro simples: empresa_tecnico deve ser igual ao nome da empresa do usuário
         $query->whereHas('agenda', function ($q) use ($empresaNome) {
-    $q->whereRaw("
-        LOWER(REPLACE(TRIM(empresa_tecnico), ' ', ''))
-        =
-        LOWER(REPLACE(TRIM(?), ' ', ''))
-    ", [$empresaNome]);
-});
+            $q->where('empresa_tecnico', $empresaNome);
+        });
     }
 
-    // Carrega dados
+    // Carrega agenda incluindo empresa_tecnico pra evitar "N/A"
     $vistorias = $query->with([
         'fiscal:id,nome,empresa_id',
         'fiscal.empresa:id,nome',
-        'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at,nome_tecnico,city'
+        'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at'
     ])->latest()->get();
 
-    // Formatar tabela
     $formattedData = $vistorias->map(function ($vistoria) {
         $dataLaudo = $vistoria->created_at?->toDateString();
         $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
-        $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5))) 
-            ? 'Vencido' 
-            : 'No Prazo';
+        $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5))) ? 'Vencido' : 'No Prazo';
 
         return [
             'id' => $vistoria->id,
+            // pega da agenda (empresa do técnico, conforme você pediu)
             'regional' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
             'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
             'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
-            'tecnico' => $vistoria->agenda?->nome_tecnico, 
-            'cidade' => $vistoria->agenda?->city, 
             'supervisor' => 'N/A',
             'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
             'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
@@ -156,16 +147,14 @@ class VistoriaController extends Controller
             'dataSla' => $dataSla,
             'sla' => $slaStatus,
             'statusLaudo' => $vistoria->status_laudo,
-            'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
+            'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0
         ];
     });
 
-    // KPIs
     $kpiData = [
         'totalBacklog' => $formattedData->count(),
         'slaVencido' => $formattedData->where('sla', 'Vencido')->count(),
         'concluidos' => Vistoria::where('status_laudo', 'Finalizado')->count(),
-        'empresa' => $empresaNome
     ];
 
     return response()->json([
@@ -173,6 +162,8 @@ class VistoriaController extends Controller
         'kpiData' => $kpiData
     ]);
 }
+
+
 
 
     /**
