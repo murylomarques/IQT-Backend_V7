@@ -100,7 +100,7 @@ Route::middleware('api')->group(function () {
     Route::get('/fca/users', [FcaController::class, 'indexUsers']); 
     Route::put('fca/users/{userId}', [FcaController::class, 'updateUser']); 
 
-    Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
+    Route::delete('/agenda/{agenda}', [AgendaController::class, 'destroy']);
 
 });
  
