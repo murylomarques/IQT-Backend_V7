@@ -103,7 +103,6 @@ public function backlog(Request $request)
     // Se não for administrador, filtra pelas vistorias cuja agenda.empresa_tecnico
     // seja igual ao nome da empresa do usuário
     if ($user->cargo_id != 1) {
-        // Se o usuário não tem empresa vinculada, retorna array vazio (evita mostrar tudo)
         if (!$empresaNome) {
             return response()->json([
                 'tableData' => collect(),
@@ -116,29 +115,35 @@ public function backlog(Request $request)
             ]);
         }
 
-        // Filtro simples: empresa_tecnico deve ser igual ao nome da empresa do usuário
         $query->whereHas('agenda', function ($q) use ($empresaNome) {
             $q->where('empresa_tecnico', $empresaNome);
         });
     }
 
-    // Carrega agenda incluindo empresa_tecnico pra evitar "N/A"
+    // ✅ inclui nome_tecnico no eager loading
     $vistorias = $query->with([
         'fiscal:id,nome,empresa_id',
         'fiscal.empresa:id,nome',
-        'agenda:id,numero_compromisso,empresa_tecnico,territorio,created_at'
+        'agenda:id,numero_compromisso,empresa_tecnico,nome_tecnico,territorio,created_at'
     ])->latest()->get();
 
     $formattedData = $vistorias->map(function ($vistoria) {
         $dataLaudo = $vistoria->created_at?->toDateString();
         $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
-        $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5))) ? 'Vencido' : 'No Prazo';
+        $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5)))
+            ? 'Vencido'
+            : 'No Prazo';
 
         return [
             'id' => $vistoria->id,
-            // pega da agenda (empresa do técnico, conforme você pediu)
+
+            // empresa do técnico
             'regional' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
-            'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
+            'empresa'  => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
+
+            // ✅ nome do técnico
+            'tecnico'  => $vistoria->agenda?->nome_tecnico ?? 'N/A',
+
             'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
             'supervisor' => 'N/A',
             'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
@@ -162,6 +167,7 @@ public function backlog(Request $request)
         'kpiData' => $kpiData
     ]);
 }
+
 
 
 
