@@ -38,8 +38,17 @@ class VistoriaSegurancaController extends Controller
      */
     public function store(Request $request)
     {
-        // ✅ valores aceitos agora
+        // Opções de Sim/Não/NA
         $opcoes = 'Sim,Não,Não se Aplica';
+
+        // Opções do motivo
+        $motivos = [
+            'Atividade interna',
+            'Atividade finalizada',
+            'Quebra de agenda',
+            'Veículo de outro setor',
+            'Endereço de base',
+        ];
 
         $validator = Validator::make($request->all(), [
             'inspetor_id'       => 'required|exists:users,id',
@@ -51,6 +60,15 @@ class VistoriaSegurancaController extends Controller
 
             'tecnico_no_local'    => "required|in:$opcoes",
             'atividade_externa'   => "required|in:$opcoes",
+
+            // ✅ NOVO CAMPO (só obrigatório quando atividade_externa = "Não")
+            'motivo_sem_atividade_externa' => [
+                'nullable',
+                'required_if:atividade_externa,Não',
+                'string',
+                'in:' . implode(',', $motivos),
+                'max:255'
+            ],
 
             'cpf_tecnico'       => 'required|string|max:20',
             'nome_supervisor'   => 'required|string|max:255',
@@ -78,6 +96,11 @@ class VistoriaSegurancaController extends Controller
             return response()->json(['message' => 'ID do inspetor inválido.'], 403);
         }
 
+        // ✅ Se não for "Não", limpa o motivo pra não salvar lixo
+        if (($validatedData['atividade_externa'] ?? null) !== 'Não') {
+            $validatedData['motivo_sem_atividade_externa'] = null;
+        }
+
         try {
             $vistoria = VistoriaSeguranca::create($validatedData);
             return response()->json($vistoria, 201);
@@ -86,14 +109,14 @@ class VistoriaSegurancaController extends Controller
             Log::error('Erro ao criar registro de vistoria: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Ocorreu um erro interno ao criar o registro da vistoria.',
-                'error' => $e->getMessage(),
+                'error'   => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
      * ETAPA 2: Faz o upload de um arquivo e o associa a uma vistoria existente.
-     * Recebe os dados via multipart/form-data (base64).
+     * Recebe os dados via JSON Base64.
      */
     public function upload(Request $request, VistoriaSeguranca $vistoria)
     {
@@ -114,7 +137,7 @@ class VistoriaSegurancaController extends Controller
 
             $meta = '';
             if (str_contains($base64, ',')) {
-                [$meta, $fileData] = explode(',', $base64);
+                [$meta, $fileData] = explode(',', $base64, 2);
             } else {
                 $fileData = $base64;
             }

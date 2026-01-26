@@ -24,7 +24,6 @@ class ExportController extends Controller
         // ==========================================================
         // ===== PASSO 1: DEFINIR TODAS AS COLUNAS DO CHECKLIST =====
         // ==========================================================
-        // (mantive a sua lista atual)
         $checklistKeys = [
             'identificacao_cto',
             'identificacao_endereco',
@@ -56,7 +55,6 @@ class ExportController extends Controller
         // ==========================================================
         // ===== PASSO 2: MAPA DE PESOS (LEVE/MODERADA/GRAVE) =======
         // ==========================================================
-        // Baseado no arquivo que você mandou (Guaracy_peso laudos_qualidade). :contentReference[oaicite:3]{index=3}
         $pesoPorItem = [
             'identificacao_cto'             => 'GRAVE',
             'identificacao_endereco'        => 'GRAVE',
@@ -99,25 +97,22 @@ class ExportController extends Controller
             $checklistHeaders[] = "ObsCorreção - {$key}";
         }
 
-        // Adicionei campos do agendamentos_servicos + calculados
         $headers = array_merge([
-            // Vistoria
             'ID Vistoria',
             'Data Vistoria',
             'Tipo Vistoria',
             'Status do Laudo',
 
-            // Fiscal / Empresa terceirizada
             'Nome do Fiscal',
-            'Empresa Terceirizada',
 
-            // Agenda (já existia no seu export)
+            // ✅ CORRIGIDO: Empresa do Técnico vem de agenda.empresa_tecnico
+            'Empresa do Técnico',
+
             'Numero Compromisso',
             'Cliente',
             'Endereço',
             'Técnico',
 
-            // agendamentos_servicos (tabela que você mostrou)
             'Numero Cliente (ag_servicos)',
             'Protocolo (ag_servicos)',
             'Nome Cliente (ag_servicos)',
@@ -136,10 +131,8 @@ class ExportController extends Controller
             'Status Retirada (ag_servicos)',
             'Data Envio (ag_servicos)',
 
-            // Observações gerais vistoria
             'Observações Gerais',
 
-            // Calculados
             'Resultado da Vistoria',
             'Classificação (Leve/Moderada/Grave)',
             'Status do Backlog',
@@ -152,14 +145,13 @@ class ExportController extends Controller
         ) {
             $handle = fopen('php://output', 'w');
 
-            // BOM pro Excel ler UTF-8 (igual seu arquivo atual). :contentReference[oaicite:4]{index=4}
+            // BOM UTF-8 pro Excel
             fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
             fputcsv($handle, $headers);
 
             // ==========================================================
             // ===== PASSO 4: PRÉ-CARREGAR agendamentos_servicos ========
             // ==========================================================
-            // Faz um “mapa” por numero_compromisso (evita consulta por linha)
             $agServicosMap = DB::table('agendamentos_servicos')
                 ->select([
                     'numero_compromisso',
@@ -187,35 +179,21 @@ class ExportController extends Controller
             // ==========================================================
             // ===== PASSO 5: BUSCAR VISTORIAS + RELAÇÕES (chunk) =======
             // ==========================================================
-            Vistoria::with(['fiscal.empresa', 'agenda', 'checklistItens'])
+            Vistoria::with(['fiscal', 'agenda', 'checklistItens'])
                 ->whereBetween('created_at', [$startDate, $endDate])
                 ->chunk(200, function ($vistorias) use ($handle, $checklistKeys, $pesoPorItem, $agServicosMap) {
                     foreach ($vistorias as $vistoria) {
                         $numeroCompromisso = $vistoria->agenda?->numero_compromisso ?? null;
                         $ag = $numeroCompromisso ? ($agServicosMap[$numeroCompromisso] ?? null) : null;
 
-                        // ==========================================================
-                        // ===== PASSO 6: TRANSFORMAR ITENS EM MAPA RÁPIDO ==========
-                        // ==========================================================
                         $itemsMap = $vistoria->checklistItens->keyBy('item_key');
 
-                        // ==========================================================
-                        // ===== PASSO 7: CALCULAR RESULTADO / CLASSIFICAÇÃO =======
-                        // ==========================================================
-                        // Considero "Irregular" se existir pelo menos 1 item "Não Conforme"
                         $temNaoConforme = false;
-
-                        // Classificação: pega a maior severidade entre os "Não Conforme"
                         $severidadeRank = ['LEVE' => 1, 'MODERADA' => 2, 'GRAVE' => 3];
                         $maiorSeveridade = null;
 
-                        // Backlog:
-                        // - Sem backlog: nenhum "Não Conforme"
-                        // - Aberto: existe "Não Conforme" e algum status_correcao != Aprovado
-                        // - Resolvido: existe "Não Conforme" e todos os NC estão Aprovado
                         $naoConformes = [];
                         foreach ($itemsMap as $itemKey => $item) {
-                            // status do checklist (enum): Conforme | Não Conforme | Não se Aplica
                             if (($item->status ?? '') === 'Não Conforme') {
                                 $temNaoConforme = true;
                                 $naoConformes[] = $item;
@@ -248,9 +226,9 @@ class ExportController extends Controller
                             $statusBacklog = $todosAprovados ? 'Backlog Resolvido' : 'Backlog Aberto';
                         }
 
-                        // ==========================================================
-                        // ===== PASSO 8: DADOS PRINCIPAIS + agendamentos_servicos ===
-                        // ==========================================================
+                        // ✅ CORRIGIDO: empresa do técnico (agenda.empresa_tecnico)
+                        $empresaTecnico = $vistoria->agenda?->empresa_tecnico ?? 'N/A';
+
                         $mainData = [
                             $vistoria->id,
                             optional($vistoria->created_at)->format('d/m/Y H:i'),
@@ -258,14 +236,13 @@ class ExportController extends Controller
                             $vistoria->status_laudo ?? 'N/A',
 
                             $vistoria->fiscal?->nome ?? 'N/A',
-                            $vistoria->fiscal?->empresa?->nome ?? 'N/A',
+                            $empresaTecnico,
 
                             $numeroCompromisso ?? 'N/A',
                             $vistoria->agenda?->nome_conta ?? 'N/A',
                             $vistoria->agenda?->endereco ?? 'N/A',
                             $vistoria->agenda?->nome_tecnico ?? 'N/A',
 
-                            // agendamentos_servicos (se não achar, vai vazio)
                             $ag->numero_cliente ?? '',
                             $ag->protocolo ?? '',
                             $ag->nome_cliente ?? '',
@@ -286,15 +263,11 @@ class ExportController extends Controller
 
                             $vistoria->observacoes_gerais ?? '',
 
-                            // calculados
                             $resultadoVistoria,
                             $classificacao,
                             $statusBacklog,
                         ];
 
-                        // ==========================================================
-                        // ===== PASSO 9: CHECKLIST COMPLETO (4 colunas por item) ===
-                        // ==========================================================
                         $checklistData = [];
                         foreach ($checklistKeys as $key) {
                             if (isset($itemsMap[$key])) {
