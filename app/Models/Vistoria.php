@@ -11,38 +11,25 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Vistoria extends Model
 {
     use HasFactory;
-     protected $fillable = [
-        'inspetor_id', 'regional_id', 'cidade', 'nome_tecnico', 'empresa_id',
-        'modo_despache', 'tecnico_no_local', 'atividade_externa', 'cpf_tecnico',
-        'nome_supervisor', 'placa', 'uso_capacete', 'uso_cinto', 'uso_talabarte',
-        'uso_botas', 'escada_estavel', 'escada_amarrada', 'sinalizacao_cones',
-        'escada_bom_estado', 'observacoes',
+    protected $fillable = ['agenda_id', 'fiscal_id', 'tipo', 'observacoes_gerais', 'status_laudo' ];
 
-        // ✅ NOVO
-        'tipo_valido',
-        'motivo_sem_atividade_externa', // se você estiver salvando isso
-    ];
-
-    public function arquivos(): HasMany
+    /**
+     * Define a relação: uma Vistoria tem muitos itens de checklist.
+     * O nome do método DEVE ser exatamente 'checklistItens' para corresponder ao controller.
+     */
+    public function checklistItens(): HasMany
     {
-        return $this->hasMany(VistoriaSegurancaArquivo::class);
+        return $this->hasMany(VistoriaChecklistItem::class);
+    }
+     public function fiscal(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'fiscal_id');
     }
 
-    public function inspetor(): BelongsTo
+    public function agenda(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'inspetor_id');
+        return $this->belongsTo(Agenda::class, 'agenda_id');
     }
-
-    public function regional(): BelongsTo
-    {
-        return $this->belongsTo(Regional::class, 'regional_id');
-    }
-
-    public function empresa(): BelongsTo
-    {
-        return $this->belongsTo(Empresa::class, 'empresa_id');
-    }
-
 
 
 }
