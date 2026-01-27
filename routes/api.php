@@ -101,7 +101,7 @@ Route::middleware('api')->group(function () {
         Route::put('fca/users/{userId}', [FcaController::class, 'updateUser']); 
         
         Route::delete('/agenda/{agenda}', [AgendaController::class, 'destroy']);
-        Route::PATCH('/vistorias-seguranca/${vistoriaId}/invalidar', [ExportController::class, 'invalidar']);
+        Route::patch('vistorias-seguranca/{vistoria}/invalidar', [ExportController::class, 'invalidar']);
         
         });
         
