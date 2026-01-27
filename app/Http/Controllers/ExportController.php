@@ -21,9 +21,6 @@ class ExportController extends Controller
         $startDate = Carbon::parse($validated['start_date'])->startOfDay();
         $endDate   = Carbon::parse($validated['end_date'])->endOfDay();
 
-        // ==========================================================
-        // ===== PASSO 1: DEFINIR TODAS AS COLUNAS DO CHECKLIST =====
-        // ==========================================================
         $checklistKeys = [
             'identificacao_cto',
             'identificacao_endereco',
@@ -52,9 +49,6 @@ class ExportController extends Controller
             'necessita_retorno',
         ];
 
-        // ==========================================================
-        // ===== PASSO 2: MAPA DE PESOS (LEVE/MODERADA/GRAVE) =======
-        // ==========================================================
         $pesoPorItem = [
             'identificacao_cto'             => 'GRAVE',
             'identificacao_endereco'        => 'GRAVE',
@@ -84,11 +78,9 @@ class ExportController extends Controller
             'tecnico_testes_produtos'       => 'LEVE',
             'teste_velocidade_pontos'       => 'LEVE',
             'cliente_app_desktop'           => 'LEVE',
+            'cliente_app_desktop'           => 'LEVE',
         ];
 
-        // ==========================================================
-        // ===== PASSO 3: CABEÇALHO DO CSV (TUDO + CALCULADOS) ======
-        // ==========================================================
         $checklistHeaders = [];
         foreach ($checklistKeys as $key) {
             $checklistHeaders[] = "Status - {$key}";
@@ -104,8 +96,6 @@ class ExportController extends Controller
             'Status do Laudo',
 
             'Nome do Fiscal',
-
-            // ✅ CORRIGIDO: Empresa do Técnico vem de agenda.empresa_tecnico
             'Empresa do Técnico',
 
             'Numero Compromisso',
@@ -145,13 +135,9 @@ class ExportController extends Controller
         ) {
             $handle = fopen('php://output', 'w');
 
-            // BOM UTF-8 pro Excel
             fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
             fputcsv($handle, $headers);
 
-            // ==========================================================
-            // ===== PASSO 4: PRÉ-CARREGAR agendamentos_servicos ========
-            // ==========================================================
             $agServicosMap = DB::table('agendamentos_servicos')
                 ->select([
                     'numero_compromisso',
@@ -176,9 +162,6 @@ class ExportController extends Controller
                 ->get()
                 ->keyBy('numero_compromisso');
 
-            // ==========================================================
-            // ===== PASSO 5: BUSCAR VISTORIAS + RELAÇÕES (chunk) =======
-            // ==========================================================
             Vistoria::with(['fiscal', 'agenda', 'checklistItens'])
                 ->whereBetween('created_at', [$startDate, $endDate])
                 ->chunk(200, function ($vistorias) use ($handle, $checklistKeys, $pesoPorItem, $agServicosMap) {
@@ -226,7 +209,6 @@ class ExportController extends Controller
                             $statusBacklog = $todosAprovados ? 'Backlog Resolvido' : 'Backlog Aberto';
                         }
 
-                        // ✅ CORRIGIDO: empresa do técnico (agenda.empresa_tecnico)
                         $empresaTecnico = $vistoria->agenda?->empresa_tecnico ?? 'N/A';
 
                         $mainData = [
@@ -296,7 +278,6 @@ class ExportController extends Controller
         return $response;
     }
 
-    // Mantive seu exportSeguranca intacto
     public function exportSeguranca(Request $request)
     {
         $request->validate([
@@ -306,7 +287,6 @@ class ExportController extends Controller
 
         $fileName = 'vistorias_seguranca.csv';
 
-        // ✅ Carrega o inspetor e pega só os campos necessários (inclui "nome")
         $vistorias = VistoriaSeguranca::with([
                 'inspetor:id,nome',
                 'regional:id,nome',
@@ -336,17 +316,13 @@ class ExportController extends Controller
 
         $callback = function () use ($vistorias, $columns) {
             $file = fopen('php://output', 'w');
-
-            // ✅ BOM UTF-8 pro Excel
             fprintf($file, chr(0xEF) . chr(0xBB) . chr(0xBF));
-
             fputcsv($file, $columns);
 
             foreach ($vistorias as $vistoria) {
                 $row = [
                     $vistoria->id,
                     optional($vistoria->created_at)->format('d/m/Y H:i:s') ?? '',
-                    // ✅ CORRIGIDO: user tem "nome", não "name"
                     $vistoria->inspetor?->nome ?? 'N/A',
                     $vistoria->regional?->nome ?? 'N/A',
                     $vistoria->cidade ?? '',
@@ -377,25 +353,32 @@ class ExportController extends Controller
 
         return response()->stream($callback, 200, $headers);
     }
+
+    /**
+     * INVALIDAR laudo SEM login, usando API KEY no header.
+     * Header obrigatório: X-ADMIN-KEY: <sua-chave>
+     */
     public function invalidar(Request $request, VistoriaSeguranca $vistoria)
     {
-        // ✅ Ajuste esta regra como você quiser:
-        // Aqui deixei apenas ADMIN (cargo_id == 1) invalidar
-       
-        // (Opcional) motivo
         $request->validate([
             'motivo' => 'nullable|string|max:255',
         ]);
 
-        // Se quiser guardar motivo, precisa criar coluna no banco.
-        // Por enquanto só invalida.
+        $adminKey = $request->header('X-ADMIN-KEY');
+        $expected = config('app.admin_invalidar_key'); // vem do .env
+
+        if (!$expected || !$adminKey || !hash_equals($expected, $adminKey)) {
+            return response()->json(['message' => 'Não autorizado.'], 403);
+        }
+
+        // Se quiser guardar motivo: criar coluna e salvar aqui.
         $vistoria->update([
             'tipo_valido' => 'No',
         ]);
 
         return response()->json([
             'message' => 'Laudo invalidado com sucesso.',
-            'data' => $vistoria
+            'data' => $vistoria,
         ], 200);
     }
 }
