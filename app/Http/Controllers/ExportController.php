@@ -366,7 +366,7 @@ class ExportController extends Controller
      * - Sem login
      * - Protegido por header X-Invalidate-Key
      */
-    public function invalidar(Request $request, Vistoria $vistoria)
+    public function invalidar(Request $request, VistoriaSeguranca $vistoria)
     {
 
         $vistoria->update(['tipo_valido' => 'No']);
