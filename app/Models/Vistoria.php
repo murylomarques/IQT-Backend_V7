@@ -4,12 +4,13 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasMany; // Importe o HasMany
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class VistoriaSeguranca extends Model
+
+class Vistoria extends Model
 {
-    use HasFactory;
+     use HasFactory;
 
     protected $table = 'vistorias_seguranca';
 
@@ -44,4 +45,6 @@ class VistoriaSeguranca extends Model
     {
         return $this->belongsTo(Empresa::class, 'empresa_id');
     }
+
+
 }
