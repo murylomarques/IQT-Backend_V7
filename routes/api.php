@@ -83,25 +83,25 @@ Route::middleware('api')->group(function () {
         Route::get('/vistorias/{vistoria}/data-pdf', [VistoriaController::class, 'dataForPdf']);
         Route::get('/vistorias-seguranca', [VistoriaSegurancaController::class, 'index']);
         Route::get('/export/seguranca', [ExportController::class, 'exportSeguranca']);
+        });
+        Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
+        
+        Route::post('/agenda', [AgendaController::class, 'store']);
+        Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
+        
+        Route::post('/loginfca', [FcaController::class, 'login']);
+        Route::post('/fca/usuario', [FcaController::class, 'criarUsuario']);
+        Route::get('/fca/registros', [FcaRegistroController::class, 'index']);
+        Route::post('/fca/registros', [FcaRegistroController::class, 'store']);
+        Route::put('/fca/registros/{id}', [FcaRegistroController::class, 'update']);
+        Route::delete('/fca/registros/{id}', [FcaRegistroController::class, 'destroy']);
+        Route::get('/fca/registros/coordenador', [FcaRegistroController::class, 'indexCoordenador']);
+        Route::get('/fca/registros/all', [FcaRegistroController::class, 'indexAll']);
+        Route::get('/fca/users', [FcaController::class, 'indexUsers']); 
+        Route::put('fca/users/{userId}', [FcaController::class, 'updateUser']); 
+        
+        Route::delete('/agenda/{agenda}', [AgendaController::class, 'destroy']);
         Route::PATCH('/vistorias-seguranca/${vistoriaId}/invalidar', [ExportController::class, 'invalidar']);
-    });
-    Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
-    
-    Route::post('/agenda', [AgendaController::class, 'store']);
-    Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
-
-    Route::post('/loginfca', [FcaController::class, 'login']);
-    Route::post('/fca/usuario', [FcaController::class, 'criarUsuario']);
-    Route::get('/fca/registros', [FcaRegistroController::class, 'index']);
-    Route::post('/fca/registros', [FcaRegistroController::class, 'store']);
-    Route::put('/fca/registros/{id}', [FcaRegistroController::class, 'update']);
-    Route::delete('/fca/registros/{id}', [FcaRegistroController::class, 'destroy']);
-    Route::get('/fca/registros/coordenador', [FcaRegistroController::class, 'indexCoordenador']);
-    Route::get('/fca/registros/all', [FcaRegistroController::class, 'indexAll']);
-    Route::get('/fca/users', [FcaController::class, 'indexUsers']); 
-    Route::put('fca/users/{userId}', [FcaController::class, 'updateUser']); 
-
-    Route::delete('/agenda/{agenda}', [AgendaController::class, 'destroy']);
-
-});
- 
+        
+        });
+        
