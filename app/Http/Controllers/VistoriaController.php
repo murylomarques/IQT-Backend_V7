@@ -93,12 +93,13 @@ public function backlog(Request $request)
     // Pega o nome da empresa do usuário via relação empresa()
     $empresaNome = $user->empresa?->nome ?? null;
 
-    $query = Vistoria::where('status_laudo', '!=', 'Finalizado')
-        ->withCount([
-            'checklistItens as itens_reprovados' => function ($q) {
-                $q->where('status_correcao', 'Reprovado');
-            }
-        ]);
+   $query = Vistoria::whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
+    ->withCount([
+        'checklistItens as itens_reprovados' => function ($q) {
+            $q->where('status_correcao', 'Reprovado');
+        }
+    ]);
+
 
     // Se não for administrador, filtra pelas vistorias cuja agenda.empresa_tecnico
     // seja igual ao nome da empresa do usuário
