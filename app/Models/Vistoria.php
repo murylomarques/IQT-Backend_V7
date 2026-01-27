@@ -10,11 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Vistoria extends Model
 {
-     use HasFactory;
-
-    protected $table = 'vistorias_seguranca';
-
-    protected $fillable = [
+    use HasFactory;
+     protected $fillable = [
         'inspetor_id', 'regional_id', 'cidade', 'nome_tecnico', 'empresa_id',
         'modo_despache', 'tecnico_no_local', 'atividade_externa', 'cpf_tecnico',
         'nome_supervisor', 'placa', 'uso_capacete', 'uso_cinto', 'uso_talabarte',
@@ -45,6 +42,7 @@ class Vistoria extends Model
     {
         return $this->belongsTo(Empresa::class, 'empresa_id');
     }
+
 
 
 }
