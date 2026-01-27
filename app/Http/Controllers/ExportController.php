@@ -381,11 +381,7 @@ class ExportController extends Controller
     {
         // ✅ Ajuste esta regra como você quiser:
         // Aqui deixei apenas ADMIN (cargo_id == 1) invalidar
-        $user = Auth::user();
-        if (!$user || $user->cargo_id != 1) {
-            return response()->json(['message' => 'Não autorizado.'], 403);
-        }
-
+       
         // (Opcional) motivo
         $request->validate([
             'motivo' => 'nullable|string|max:255',
