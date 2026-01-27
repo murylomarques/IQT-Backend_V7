@@ -369,17 +369,11 @@ class ExportController extends Controller
     public function invalidar(Request $request, VistoriaSeguranca $vistoria)
     {
 
-        $request->validate([
-            'motivo' => 'nullable|string|max:255',
-        ]);
-
-        $vistoria->update([
-            'tipo_valido' => 'No',
-        ]);
+        $vistoria->update(['tipo_valido' => 'No']);
 
         return response()->json([
-            'message' => 'Laudo invalidado com sucesso.',
+            'message' => 'Laudo (Qualidade) invalidado com sucesso.',
             'data' => $vistoria
-        ], 200);
+        ]);
     }
 }
