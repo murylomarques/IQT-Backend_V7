@@ -4,10 +4,11 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Vistoria;
+use App\Models\VistoriaSeguranca;
 use Carbon\Carbon;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Illuminate\Support\Facades\DB;
-use App\Models\VistoriaSeguranca;
+use Illuminate\Support\Facades\Log;
 
 class ExportController extends Controller
 {
@@ -78,7 +79,6 @@ class ExportController extends Controller
             'tecnico_testes_produtos'       => 'LEVE',
             'teste_velocidade_pontos'       => 'LEVE',
             'cliente_app_desktop'           => 'LEVE',
-            'cliente_app_desktop'           => 'LEVE',
         ];
 
         $checklistHeaders = [];
@@ -96,6 +96,8 @@ class ExportController extends Controller
             'Status do Laudo',
 
             'Nome do Fiscal',
+
+            // Empresa do técnico (agenda.empresa_tecnico)
             'Empresa do Técnico',
 
             'Numero Compromisso',
@@ -135,6 +137,7 @@ class ExportController extends Controller
         ) {
             $handle = fopen('php://output', 'w');
 
+            // BOM UTF-8 pro Excel
             fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
             fputcsv($handle, $headers);
 
@@ -291,6 +294,7 @@ class ExportController extends Controller
                 'inspetor:id,nome',
                 'regional:id,nome',
                 'empresa:id,nome',
+                'arquivos:id,vistoria_seguranca_id,path',
             ])
             ->whereBetween('created_at', [
                 $request->start_date . ' 00:00:00',
@@ -311,11 +315,13 @@ class ExportController extends Controller
             'ID', 'Data', 'Inspetor', 'Regional', 'Cidade', 'Técnico', 'CPF Técnico', 'Empresa',
             'Supervisor', 'Placa', 'Despache', 'Técnico no Local', 'Atividade Externa',
             'Uso Capacete', 'Uso Cinto', 'Uso Talabarte', 'Uso Botas', 'Escada Estável',
-            'Escada Amarrada', 'Cones Sinalização', 'Escada Bom Estado', 'Observações'
+            'Escada Amarrada', 'Cones Sinalização', 'Escada Bom Estado', 'Observações',
+            'Tipo Válido',
         ];
 
         $callback = function () use ($vistorias, $columns) {
             $file = fopen('php://output', 'w');
+
             fprintf($file, chr(0xEF) . chr(0xBB) . chr(0xBF));
             fputcsv($file, $columns);
 
@@ -343,6 +349,7 @@ class ExportController extends Controller
                     $vistoria->sinalizacao_cones ?? '',
                     $vistoria->escada_bom_estado ?? '',
                     $vistoria->observacoes ?? '',
+                    $vistoria->tipo_valido ?? 'Yes',
                 ];
 
                 fputcsv($file, $row);
@@ -355,23 +362,24 @@ class ExportController extends Controller
     }
 
     /**
-     * INVALIDAR laudo SEM login, usando API KEY no header.
-     * Header obrigatório: X-ADMIN-KEY: <sua-chave>
+     * INVALIDAR LAUDO DE SEGURANÇA
+     * - Sem login
+     * - Protegido por header X-Invalidate-Key
      */
     public function invalidar(Request $request, VistoriaSeguranca $vistoria)
     {
+
         $request->validate([
             'motivo' => 'nullable|string|max:255',
         ]);
 
-        // Se quiser guardar motivo: criar coluna e salvar aqui.
         $vistoria->update([
             'tipo_valido' => 'No',
         ]);
 
         return response()->json([
             'message' => 'Laudo invalidado com sucesso.',
-            'data' => $vistoria,
+            'data' => $vistoria
         ], 200);
     }
 }
