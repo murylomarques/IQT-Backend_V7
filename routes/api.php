@@ -83,6 +83,7 @@ Route::middleware('api')->group(function () {
         Route::get('/vistorias/{vistoria}/data-pdf', [VistoriaController::class, 'dataForPdf']);
         Route::get('/vistorias-seguranca', [VistoriaSegurancaController::class, 'index']);
         Route::get('/export/seguranca', [ExportController::class, 'exportSeguranca']);
+        Route::PATCH('/vistorias-seguranca/${vistoriaId}/invalidar', [ExportController::class, 'invalidar']);
     });
     Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
     

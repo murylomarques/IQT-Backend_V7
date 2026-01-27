@@ -377,4 +377,29 @@ class ExportController extends Controller
 
         return response()->stream($callback, 200, $headers);
     }
+    public function invalidar(Request $request, VistoriaSeguranca $vistoria)
+    {
+        // ✅ Ajuste esta regra como você quiser:
+        // Aqui deixei apenas ADMIN (cargo_id == 1) invalidar
+        $user = Auth::user();
+        if (!$user || $user->cargo_id != 1) {
+            return response()->json(['message' => 'Não autorizado.'], 403);
+        }
+
+        // (Opcional) motivo
+        $request->validate([
+            'motivo' => 'nullable|string|max:255',
+        ]);
+
+        // Se quiser guardar motivo, precisa criar coluna no banco.
+        // Por enquanto só invalida.
+        $vistoria->update([
+            'tipo_valido' => 'No',
+        ]);
+
+        return response()->json([
+            'message' => 'Laudo invalidado com sucesso.',
+            'data' => $vistoria
+        ], 200);
+    }
 }

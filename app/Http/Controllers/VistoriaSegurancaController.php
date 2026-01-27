@@ -21,7 +21,12 @@ class VistoriaSegurancaController extends Controller
             'end_date'   => 'required|date|after_or_equal:start_date',
         ]);
 
-        $vistorias = VistoriaSeguranca::with('arquivos', 'inspetor', 'regional', 'empresa')
+        $vistorias = VistoriaSeguranca::with([
+                'arquivos:id,vistoria_seguranca_id,path,created_at',
+                'inspetor:id,nome',
+                'regional:id,nome',
+                'empresa:id,nome',
+            ])
             ->whereBetween('created_at', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date . ' 23:59:59'
@@ -31,6 +36,7 @@ class VistoriaSegurancaController extends Controller
 
         return response()->json($vistorias);
     }
+
 
     /**
      * ETAPA 1: Cria um novo registro de Vistoria de Segurança SEM arquivos.
