@@ -364,13 +364,6 @@ class ExportController extends Controller
             'motivo' => 'nullable|string|max:255',
         ]);
 
-        $adminKey = $request->header('X-ADMIN-KEY');
-        $expected = config('app.admin_invalidar_key'); // vem do .env
-
-        if (!$expected || !$adminKey || !hash_equals($expected, $adminKey)) {
-            return response()->json(['message' => 'Não autorizado.'], 403);
-        }
-
         // Se quiser guardar motivo: criar coluna e salvar aqui.
         $vistoria->update([
             'tipo_valido' => 'No',
