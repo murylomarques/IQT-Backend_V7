@@ -47,6 +47,12 @@ class FcaController extends Controller
     // 🧩 Função para criar um usuário FCA
     public function criarUsuario(Request $request)
     {
+        $admin = $this->getUserFromToken($request);
+        if (!$admin || $admin->cargo !== 'Administrador') {
+            return response()->json(['error' => 'Acesso n??o autorizado.'], 403);
+        }
+
+
         $request->validate([
             'nome' => 'required|string|max:255',
             'email' => 'nullable|email|unique:fca_users,email',
@@ -81,7 +87,7 @@ class FcaController extends Controller
     {
         
         // Seleciona apenas os campos seguros para não expor senhas ou tokens
-        $users = FcaUser::select('id', 'nome', 'email', 'usuario', 'cargo', 'created_at')
+        $users = FcaUser::select('id', 'nome', 'email', 'usuario', 'cargo', 'nivel_hierarquia', 'created_at')
             ->orderBy('nome', 'asc')
             ->get();
 
@@ -93,6 +99,10 @@ class FcaController extends Controller
         $token = $request->header('Authorization');
         if (!$token) {
             return null;
+        }
+
+        if (str_starts_with($token, 'Bearer ')) {
+            $token = substr($token, 7);
         }
 
         return FcaUser::where('token', $token)->first();

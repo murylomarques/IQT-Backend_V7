@@ -24,5 +24,6 @@ class FcaUser extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'token',
     ];
 }

@@ -25,6 +25,11 @@ Route::middleware('api')->group(function () {
 
     // Login (público)
     Route::post('/login', function(Request $request) {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string',
+        ]);
+
         $user = User::where('email', $request->email)->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
@@ -37,7 +42,7 @@ Route::middleware('api')->group(function () {
             'access_token' => $token,
             'token_type' => 'Bearer',
         ]);
-    });
+    })->middleware('throttle:login');
 
     // Rotas protegidas que exigem autenticação
     Route::middleware('auth:sanctum')->group(function () {
@@ -83,24 +88,26 @@ Route::middleware('api')->group(function () {
         Route::get('/vistorias/{vistoria}/data-pdf', [VistoriaController::class, 'dataForPdf']);
         Route::get('/vistorias-seguranca', [VistoriaSegurancaController::class, 'index']);
         Route::get('/export/seguranca', [ExportController::class, 'exportSeguranca']);
+        Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
+
+        Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
+        Route::post('/agenda', [AgendaController::class, 'store']);
+        Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
     });
-    Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
-    
-    Route::post('/agenda', [AgendaController::class, 'store']);
-    Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
+    Route::post('/loginfca', [FcaController::class, 'login'])->middleware('throttle:loginfca');
 
-    Route::post('/loginfca', [FcaController::class, 'login']);
-    Route::post('/fca/usuario', [FcaController::class, 'criarUsuario']);
-    Route::get('/fca/registros', [FcaRegistroController::class, 'index']);
-    Route::post('/fca/registros', [FcaRegistroController::class, 'store']);
-    Route::put('/fca/registros/{id}', [FcaRegistroController::class, 'update']);
-    Route::delete('/fca/registros/{id}', [FcaRegistroController::class, 'destroy']);
-    Route::get('/fca/registros/coordenador', [FcaRegistroController::class, 'indexCoordenador']);
-    Route::get('/fca/registros/all', [FcaRegistroController::class, 'indexAll']);
-    Route::get('/fca/users', [FcaController::class, 'indexUsers']); 
-    Route::put('fca/users/{userId}', [FcaController::class, 'updateUser']); 
-
-    Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
+    Route::middleware('fca.auth')->group(function () {
+        Route::post('/fca/usuario', [FcaController::class, 'criarUsuario'])->middleware('fca.admin');
+        Route::post('/fca/users', [FcaController::class, 'criarUsuario'])->middleware('fca.admin');
+        Route::get('/fca/registros', [FcaRegistroController::class, 'index']);
+        Route::post('/fca/registros', [FcaRegistroController::class, 'store']);
+        Route::put('/fca/registros/{id}', [FcaRegistroController::class, 'update']);
+        Route::delete('/fca/registros/{id}', [FcaRegistroController::class, 'destroy']);
+        Route::get('/fca/registros/coordenador', [FcaRegistroController::class, 'indexCoordenador']);
+        Route::get('/fca/registros/all', [FcaRegistroController::class, 'indexAll'])->middleware('fca.admin');
+        Route::get('/fca/users', [FcaController::class, 'indexUsers'])->middleware('fca.admin');
+        Route::put('fca/users/{userId}', [FcaController::class, 'updateUser'])->middleware('fca.admin');
+    });
 
 });
  

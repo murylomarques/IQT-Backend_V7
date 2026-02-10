@@ -140,62 +140,74 @@ class ExportController extends Controller
     {
         $request->validate([
             'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
+            'end_date'   => 'required|date|after_or_equal:start_date',
         ]);
 
         $fileName = 'vistorias_seguranca.csv';
 
-        $vistorias = VistoriaSeguranca::with(['inspetor', 'regional', 'empresa'])
+        // ✅ Carrega o inspetor e pega só os campos necessários (inclui "nome")
+        $vistorias = VistoriaSeguranca::with([
+                'inspetor:id,nome',
+                'regional:id,nome',
+                'empresa:id,nome',
+            ])
             ->whereBetween('created_at', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date . ' 23:59:59'
             ])
+            ->orderBy('created_at', 'desc')
             ->get();
 
         $headers = [
-            'Content-type'        => 'text/csv',
+            'Content-type'        => 'text/csv; charset=UTF-8',
             'Content-Disposition' => "attachment; filename=$fileName",
             'Pragma'              => 'no-cache',
             'Cache-Control'       => 'must-revalidate, post-check=0, pre-check=0',
             'Expires'             => '0'
         ];
 
-        $columns = [ // Defina as colunas do seu CSV
+        $columns = [
             'ID', 'Data', 'Inspetor', 'Regional', 'Cidade', 'Técnico', 'CPF Técnico', 'Empresa',
             'Supervisor', 'Placa', 'Despache', 'Técnico no Local', 'Atividade Externa',
             'Uso Capacete', 'Uso Cinto', 'Uso Talabarte', 'Uso Botas', 'Escada Estável',
             'Escada Amarrada', 'Cones Sinalização', 'Escada Bom Estado', 'Observações'
         ];
 
-        $callback = function() use($vistorias, $columns) {
+        $callback = function () use ($vistorias, $columns) {
             $file = fopen('php://output', 'w');
+
+            // ✅ BOM UTF-8 pro Excel
+            fprintf($file, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
             fputcsv($file, $columns);
 
             foreach ($vistorias as $vistoria) {
                 $row = [
                     $vistoria->id,
-                    $vistoria->created_at->format('d/m/Y H:i:s'),
-                    $vistoria->inspetor->name ?? 'N/A',
-                    $vistoria->regional->nome ?? 'N/A',
-                    $vistoria->cidade,
-                    $vistoria->nome_tecnico,
-                    $vistoria->cpf_tecnico,
-                    $vistoria->empresa->nome ?? 'N/A',
-                    $vistoria->nome_supervisor,
-                    $vistoria->placa,
-                    $vistoria->modo_despache,
-                    $vistoria->tecnico_no_local,
-                    $vistoria->atividade_externa,
-                    $vistoria->uso_capacete,
-                    $vistoria->uso_cinto,
-                    $vistoria->uso_talabarte,
-                    $vistoria->uso_botas,
-                    $vistoria->escada_estavel,
-                    $vistoria->escada_amarrada,
-                    $vistoria->sinalizacao_cones,
-                    $vistoria->escada_bom_estado,
-                    $vistoria->observacoes
+                    optional($vistoria->created_at)->format('d/m/Y H:i:s') ?? '',
+                    // ✅ CORRIGIDO: user tem "nome", não "name"
+                    $vistoria->inspetor?->nome ?? 'N/A',
+                    $vistoria->regional?->nome ?? 'N/A',
+                    $vistoria->cidade ?? '',
+                    $vistoria->nome_tecnico ?? '',
+                    $vistoria->cpf_tecnico ?? '',
+                    $vistoria->empresa?->nome ?? 'N/A',
+                    $vistoria->nome_supervisor ?? '',
+                    $vistoria->placa ?? '',
+                    $vistoria->modo_despache ?? '',
+                    $vistoria->tecnico_no_local ?? '',
+                    $vistoria->atividade_externa ?? '',
+                    $vistoria->uso_capacete ?? '',
+                    $vistoria->uso_cinto ?? '',
+                    $vistoria->uso_talabarte ?? '',
+                    $vistoria->uso_botas ?? '',
+                    $vistoria->escada_estavel ?? '',
+                    $vistoria->escada_amarrada ?? '',
+                    $vistoria->sinalizacao_cones ?? '',
+                    $vistoria->escada_bom_estado ?? '',
+                    $vistoria->observacoes ?? '',
                 ];
+
                 fputcsv($file, $row);
             }
 
@@ -204,4 +216,5 @@ class ExportController extends Controller
 
         return response()->stream($callback, 200, $headers);
     }
+
 }

@@ -16,6 +16,10 @@ class FcaRegistroController extends Controller
             return null;
         }
 
+        if (str_starts_with($token, 'Bearer ')) {
+            $token = substr($token, 7);
+        }
+
         return FcaUser::where('token', $token)->first();
     }
      // =================================================================
@@ -122,20 +126,34 @@ class FcaRegistroController extends Controller
     }
 
     // ✏️ Atualizar um registro
-    public function update(Request $request, $id)
+public function update(Request $request, $id)
 {
     $user = $this->getUserFromToken($request);
     if (!$user) {
         return response()->json(['error' => 'Token inválido ou ausente.'], 401);
     }
 
-    $registro = FcaRegistro::where('id_supervisor', $user->id)->find($id);
+    $isAdmin = strcasecmp($user->cargo ?? '', 'Administrador') === 0;
+
+    $registro = $isAdmin
+        ? FcaRegistro::find($id)
+        : FcaRegistro::where('id_supervisor', $user->id)->find($id);
+
     if (!$registro) {
         return response()->json(['error' => 'Registro não encontrado.'], 404);
     }
 
-    // Pega os dados do request, exceto 'realizado'
-    $data = $request->only(['fato', 'causa', 'acao', 'status', 'responsavel', 'data_fim']);
+    $validated = $request->validate([
+        'fato' => 'sometimes|required|string',
+        'causa' => 'sometimes|required|string',
+        'acao' => 'sometimes|required|string',
+        'status' => 'sometimes|required|in:Pendente,Em Execução,Concluído,Vencido',
+        'responsavel' => 'sometimes|nullable|string|max:255',
+        'data_fim' => 'sometimes|nullable|date',
+        'id_supervisor' => 'sometimes|required|exists:fca_users,id',
+    ]);
+
+    $data = $validated;
 
     // Atualiza 'realizado' para 1 sempre
     $data['realizado'] = 1;
@@ -180,6 +198,7 @@ class FcaRegistroController extends Controller
         $formattedRegistros = $registros->map(function ($registro) {
             return [
                 'id' => $registro->id,
+                'id_supervisor' => $registro->id_supervisor,
                 'nome_supervisor' => $registro->supervisor->nome ?? 'N/A',
                 'nome_tecnico' => $registro->nome_tecnico,
                 'fato' => $registro->fato,
