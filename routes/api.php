@@ -82,18 +82,20 @@ Route::middleware('api')->group(function () {
         Route::apiResource('empresas', EmpresaController::class);
         Route::apiResource('regionais', RegionalController::class);
         Route::post('/vistorias-seguranca', [VistoriaSegurancaController::class, 'store']);
-         Route::post('/vistorias-seguranca/{vistoria}/upload', [VistoriaSegurancaController::class, 'upload']);
-            Route::post('/vistorias', [VistoriaController::class, 'store']);
+        Route::post('/vistorias-seguranca/{vistoria}/upload', [VistoriaSegurancaController::class, 'upload']);
+        Route::post('/vistorias', [VistoriaController::class, 'store']);
 
         Route::get('/vistorias/{vistoria}/data-pdf', [VistoriaController::class, 'dataForPdf']);
         Route::get('/vistorias-seguranca', [VistoriaSegurancaController::class, 'index']);
         Route::get('/export/seguranca', [ExportController::class, 'exportSeguranca']);
         Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
+        Route::patch('/vistorias-seguranca/{vistoria}/invalidar', [ExportController::class, 'invalidar']);
 
         Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
         Route::post('/agenda', [AgendaController::class, 'store']);
         Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
     });
+
     Route::post('/loginfca', [FcaController::class, 'login'])->middleware('throttle:loginfca');
 
     Route::middleware('fca.auth')->group(function () {
@@ -110,4 +112,3 @@ Route::middleware('api')->group(function () {
     });
 
 });
- 
