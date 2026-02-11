@@ -23,6 +23,7 @@ use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\AdminOverviewController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\MonitorController;
 use App\Http\Middleware\IsAdmin;
 use App\Services\ActivityLogService;
 
@@ -109,6 +110,12 @@ Route::middleware('api')->group(function () {
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
         Route::post('/notifications/mark-read', [NotificationController::class, 'markRead']);
         Route::post('/notifications/send', [NotificationController::class, 'send']);
+
+        // Monitor SP (proxy interno)
+        Route::get('/monitor/health', [MonitorController::class, 'health']);
+        Route::get('/monitor/dashboard', [MonitorController::class, 'dashboard']);
+        Route::get('/monitor/city/{nome}', [MonitorController::class, 'city']);
+        Route::get('/monitor/cities-analytics', [MonitorController::class, 'citiesAnalytics']);
 
         Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
         Route::post('/agenda', [AgendaController::class, 'store']);
