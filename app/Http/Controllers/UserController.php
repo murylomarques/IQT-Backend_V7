@@ -3,12 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\ActivityLogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 
 class UserController extends Controller
 {
+    public function __construct()
+    {
+        $this->middleware(\App\Http\Middleware\IsAdmin::class);
+    }
     /**
      * Exibe uma lista de todos os usuários.
      * Rota: GET /api/admin/users
@@ -40,6 +45,15 @@ class UserController extends Controller
         $validated['password'] = Hash::make($validated['password']);
 
         $user = User::create($validated);
+
+        ActivityLogService::log(
+            'user.created',
+            "Usuario {$user->email} criado",
+            auth()->id(),
+            ['target_user_id' => $user->id],
+            User::class,
+            $user->id
+        );
 
         // Retorna o usuário recém-criado com as relações carregadas
         return response()->json($user->load(['empresa', 'cargo']), 201);
@@ -78,6 +92,15 @@ class UserController extends Controller
 
         $user->update($validated);
 
+        ActivityLogService::log(
+            'user.updated',
+            "Usuario {$user->email} atualizado",
+            auth()->id(),
+            ['target_user_id' => $user->id],
+            User::class,
+            $user->id
+        );
+
         // Retorna o usuário atualizado com as relações carregadas
         return response()->json($user->load(['empresa', 'cargo']));
     }
@@ -94,6 +117,13 @@ class UserController extends Controller
         }
         
         $user->delete();
+
+        ActivityLogService::log(
+            'user.deleted',
+            "Usuario {$user->email} removido",
+            auth()->id(),
+            ['target_user_id' => $user->id]
+        );
 
         return response()->json(null, 204); // 204: No Content
     }

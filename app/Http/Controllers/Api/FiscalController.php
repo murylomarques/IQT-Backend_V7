@@ -35,8 +35,12 @@ class FiscalController extends Controller
             ->select(
                 'id',
                 'data_agendamento',
+                'hora_agendamento',
                 'periodo',
-                'status'
+                'status',
+                'numero_compromisso',
+                'nome_conta',
+                'endereco'
             )
             ->get();
 

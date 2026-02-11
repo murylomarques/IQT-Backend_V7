@@ -19,11 +19,16 @@ use App\Http\Controllers\VistoriaSegurancaController;
 use App\Http\Controllers\ExportController;
 use App\Http\Controllers\FcaController;
 use App\Http\Controllers\FcaRegistroController;
-
+use App\Http\Controllers\AccessRequestController;
+use App\Http\Controllers\AdminOverviewController;
+use App\Http\Controllers\ChatController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Middleware\IsAdmin;
+use App\Services\ActivityLogService;
 
 Route::middleware('api')->group(function () {
 
-    // Login (público)
+    // Login (publico)
     Route::post('/login', function(Request $request) {
         $request->validate([
             'email' => 'required|email',
@@ -33,10 +38,22 @@ Route::middleware('api')->group(function () {
         $user = User::where('email', $request->email)->first();
 
         if (!$user || !Hash::check($request->password, $user->password)) {
-            return response()->json(['message' => 'Credenciais inválidas'], 401);
+            return response()->json(['message' => 'Credenciais invalidas'], 401);
+        }
+
+        if ($user->status !== 'ativo') {
+            return response()->json(['message' => 'Seu acesso esta inativo. Procure o administrador.'], 403);
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
+
+        ActivityLogService::log(
+            'auth.login',
+            "Login efetuado por {$user->email}",
+            $user->id,
+            ['email' => $user->email]
+        );
+
         return response()->json([
             'user' => $user,
             'access_token' => $token,
@@ -44,7 +61,10 @@ Route::middleware('api')->group(function () {
         ]);
     })->middleware('throttle:login');
 
-    // Rotas protegidas que exigem autenticação
+    Route::get('/access-requests/options', [AccessRequestController::class, 'options'])->middleware('throttle:login');
+    Route::post('/access-requests', [AccessRequestController::class, 'store'])->middleware('throttle:login');
+
+    // Rotas protegidas que exigem autenticacao
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vistorias/ids-por-periodo', [VistoriaController::class, 'getIdsByDateRange']);
         Route::get('/atendimentos', [AtendimentoController::class, 'index']);
@@ -53,31 +73,21 @@ Route::middleware('api')->group(function () {
         Route::get('/fiscais', [FiscalController::class, 'index']);
         Route::post('/location', [LocationController::class, 'store']);
         Route::get('/home-data', [HomeController::class, 'index']);
-        
-        // --- Rotas de Agenda ---
+
+        // Rotas de Agenda
         Route::get('/agenda/minhas-vistorias-hoje', [AgendaController::class, 'minhasVistoriasHoje']);
-        
-        // ==========================================================
-        // ============= NOVAS ROTAS PARA A AGENDA GANTT ============
-        // ==========================================================
         Route::get('/agenda-gantt', [AgendaController::class, 'gantt']);
         Route::patch('/agenda-gantt/{agenda}', [AgendaController::class, 'updateGantt']);
-        // ==========================================================
-        
-        // --- Rotas de Vistoria ---
+
+        // Rotas de Vistoria
         Route::get('/vistorias/backlog', [VistoriaController::class, 'backlog']);
         Route::get('/vistorias/{vistoria}', [VistoriaController::class, 'show']);
-        
-        // --- Rotas de Correção ---
+
+        // Rotas de Correcao
         Route::post('/checklist-itens/{item}/resolver', [VistoriaController::class, 'resolverItem']);
         Route::post('/checklist-itens/{item}/avaliar', [VistoriaController::class, 'avaliarItem']);
-        
-        
-        
 
-  
         Route::apiResource('cargos', CargoController::class);
-        
         Route::apiResource('users', UserController::class);
         Route::apiResource('empresas', EmpresaController::class);
         Route::apiResource('regionais', RegionalController::class);
@@ -91,9 +101,26 @@ Route::middleware('api')->group(function () {
         Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
         Route::patch('/vistorias-seguranca/{vistoria}/invalidar', [ExportController::class, 'invalidar']);
 
+        // Chat e notificacoes
+        Route::get('/chat/users', [ChatController::class, 'users']);
+        Route::get('/chat/conversations/{user}', [ChatController::class, 'conversation']);
+        Route::post('/chat/conversations/{user}/messages', [ChatController::class, 'sendMessage']);
+        Route::get('/notifications', [NotificationController::class, 'index']);
+        Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/notifications/mark-read', [NotificationController::class, 'markRead']);
+        Route::post('/notifications/send', [NotificationController::class, 'send']);
+
         Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
         Route::post('/agenda', [AgendaController::class, 'store']);
         Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
+
+        Route::middleware(IsAdmin::class)->group(function () {
+            Route::get('/admin/overview', [AdminOverviewController::class, 'index']);
+            Route::get('/admin/access-requests', [AccessRequestController::class, 'index']);
+            Route::get('/admin/access-requests/{accessRequest}', [AccessRequestController::class, 'show']);
+            Route::post('/admin/access-requests/{accessRequest}/approve', [AccessRequestController::class, 'approve']);
+            Route::post('/admin/access-requests/{accessRequest}/reject', [AccessRequestController::class, 'reject']);
+        });
     });
 
     Route::post('/loginfca', [FcaController::class, 'login'])->middleware('throttle:loginfca');
