@@ -69,6 +69,11 @@ class MonitorController extends Controller
         $maxCities = $maxCities > 0 ? min($maxCities, 60) : 18;
         $cacheTtlSeconds = (int) $request->query('cache_ttl', 3600);
         $cacheTtlSeconds = $cacheTtlSeconds > 0 ? min($cacheTtlSeconds, 7200) : 3600;
+        $forceRefresh = in_array(
+            strtolower((string) $request->query('force_refresh', '0')),
+            ['1', 'true', 'yes', 'on'],
+            true
+        );
 
         $query = array_filter([
             'start' => $start,
@@ -82,7 +87,7 @@ class MonitorController extends Controller
         ]));
         $lastSuccessKey = 'monitor:cities-analytics:last-success';
 
-        $payload = Cache::remember($cacheKey, now()->addSeconds($cacheTtlSeconds), function () use ($query, $limit, $maxCities, $lastSuccessKey) {
+        $compute = function () use ($query, $limit, $maxCities, $lastSuccessKey) {
             $dashboardResp = Http::timeout(25)->get($this->baseUrl() . '/api/dashboard');
             if (!$dashboardResp->successful()) {
                 return [
@@ -190,7 +195,16 @@ class MonitorController extends Controller
             Cache::put($lastSuccessKey, $result, now()->addHours(6));
 
             return $result;
-        });
+        };
+
+        if ($forceRefresh) {
+            $payload = $compute();
+            if (($payload['__error'] ?? false) !== true) {
+                Cache::put($cacheKey, $payload, now()->addSeconds($cacheTtlSeconds));
+            }
+        } else {
+            $payload = Cache::remember($cacheKey, now()->addSeconds($cacheTtlSeconds), $compute);
+        }
 
         if (($payload['__error'] ?? false) === true) {
             $stale = Cache::get($lastSuccessKey);
