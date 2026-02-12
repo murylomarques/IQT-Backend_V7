@@ -68,5 +68,6 @@ class Kernel extends HttpKernel
         'verified'         => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'fca.auth'        => \App\Http\Middleware\FcaAuth::class,
         'fca.admin'       => \App\Http\Middleware\FcaAdmin::class,
+        'monitor.magic'   => \App\Http\Middleware\MonitorMagicLink::class,
     ];
 }

@@ -65,6 +65,14 @@ Route::middleware('api')->group(function () {
     Route::get('/access-requests/options', [AccessRequestController::class, 'options'])->middleware('throttle:login');
     Route::post('/access-requests', [AccessRequestController::class, 'store'])->middleware('throttle:login');
 
+    // Monitor SP publico por link magico (somente leitura)
+    Route::middleware('monitor.magic')->prefix('monitor-public')->group(function () {
+        Route::get('/health', [MonitorController::class, 'health']);
+        Route::get('/dashboard', [MonitorController::class, 'dashboard']);
+        Route::get('/city/{nome}', [MonitorController::class, 'city']);
+        Route::get('/cities-analytics', [MonitorController::class, 'citiesAnalytics']);
+    });
+
     // Rotas protegidas que exigem autenticacao
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/vistorias/ids-por-periodo', [VistoriaController::class, 'getIdsByDateRange']);
