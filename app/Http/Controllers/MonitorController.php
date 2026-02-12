@@ -65,8 +65,8 @@ class MonitorController extends Controller
         $end = $request->query('end');
         $limit = (int) $request->query('limit', 10);
         $limit = $limit > 0 ? min($limit, 30) : 10;
-        $maxCities = (int) $request->query('max_cities', 18);
-        $maxCities = $maxCities > 0 ? min($maxCities, 60) : 18;
+        $maxCities = (int) $request->query('max_cities', 0);
+        $maxCities = $maxCities > 0 ? min($maxCities, 500) : 0;
         $cacheTtlSeconds = (int) $request->query('cache_ttl', 3600);
         $cacheTtlSeconds = $cacheTtlSeconds > 0 ? min($cacheTtlSeconds, 7200) : 3600;
         $forceRefresh = in_array(
@@ -99,15 +99,15 @@ class MonitorController extends Controller
             $dashboard = $dashboardResp->json();
             $mapData = $dashboard['mapData'] ?? [];
             $cityNames = collect($mapData)
-                ->sortByDesc(function ($c) {
-                    return (float) ($c['mm_chuva'] ?? 0) + ((float) ($c['vento_speed'] ?? 0) * 0.5);
-                })
                 ->pluck('nome')
                 ->filter(fn($n) => !empty($n))
                 ->unique()
-                ->take($maxCities)
                 ->values()
                 ->all();
+
+            if ($maxCities > 0) {
+                $cityNames = array_slice($cityNames, 0, $maxCities);
+            }
 
             $detailsByCity = [];
             foreach (array_chunk($cityNames, 12) as $chunk) {
@@ -156,7 +156,10 @@ class MonitorController extends Controller
                 : 0;
 
             $topEntrantes = collect($detailsByCity)
-                ->sortByDesc('total_periodo')
+                ->sortBy([
+                    ['today_so_far', 'desc'],
+                    ['total_periodo', 'desc'],
+                ])
                 ->take($limit)
                 ->values()
                 ->all();
@@ -185,7 +188,7 @@ class MonitorController extends Controller
                 'resumo' => [
                     'cidades_analisadas' => $count,
                     'media_global_total_periodo' => $mediaGlobalTotal,
-                    'escopo_analise' => "Top {$maxCities} cidades por severidade climática atual",
+                    'escopo_analise' => $maxCities > 0 ? "Top {$maxCities} cidades monitoradas" : 'Todas as cidades monitoradas',
                 ],
                 'top_entrantes' => $topEntrantes,
                 'acima_media_operacional' => $acimaMediaOperacional,
@@ -210,7 +213,7 @@ class MonitorController extends Controller
             $stale = Cache::get($lastSuccessKey);
             if ($stale) {
                 $stale['resumo']['cache_stale'] = true;
-                $stale['resumo']['cache_notice'] = 'Exibindo ultimo resultado consolidado por timeout/falha na atualização.';
+                $stale['resumo']['cache_notice'] = 'Exibindo ultimo resultado consolidado por timeout/falha na atualizaÃ§Ã£o.';
                 return response()->json($stale);
             }
 
@@ -223,3 +226,4 @@ class MonitorController extends Controller
         return response()->json($payload);
     }
 }
+

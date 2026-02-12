@@ -16,7 +16,7 @@ class WarmMonitorAnalytics extends Command
     protected $signature = 'monitor:warm-analytics
                             {--cache_ttl=3600 : TTL do cache em segundos}
                             {--limit=10 : Quantidade para Top Entrantes}
-                            {--max_cities=18 : Quantidade de cidades a analisar}';
+                            {--max_cities=0 : Quantidade de cidades a analisar (0 = todas)}';
 
     /**
      * The console command description.

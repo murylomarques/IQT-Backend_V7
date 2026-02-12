@@ -15,7 +15,7 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        $schedule->command('monitor:warm-analytics --cache_ttl=3600 --limit=10 --max_cities=18')
+        $schedule->command('monitor:warm-analytics --cache_ttl=3600 --limit=10 --max_cities=0')
             ->hourlyAt(0)
             ->withoutOverlapping();
     }
