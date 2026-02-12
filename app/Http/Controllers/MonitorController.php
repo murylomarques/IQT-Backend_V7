@@ -65,8 +65,10 @@ class MonitorController extends Controller
         $end = $request->query('end');
         $limit = (int) $request->query('limit', 10);
         $limit = $limit > 0 ? min($limit, 30) : 10;
-        $cacheTtlSeconds = (int) $request->query('cache_ttl', 120);
-        $cacheTtlSeconds = $cacheTtlSeconds > 0 ? min($cacheTtlSeconds, 600) : 120;
+        $maxCities = (int) $request->query('max_cities', 18);
+        $maxCities = $maxCities > 0 ? min($maxCities, 60) : 18;
+        $cacheTtlSeconds = (int) $request->query('cache_ttl', 3600);
+        $cacheTtlSeconds = $cacheTtlSeconds > 0 ? min($cacheTtlSeconds, 7200) : 3600;
 
         $query = array_filter([
             'start' => $start,
@@ -75,10 +77,12 @@ class MonitorController extends Controller
         $cacheKey = 'monitor:cities-analytics:' . md5(json_encode([
             'query' => $query,
             'limit' => $limit,
+            'max_cities' => $maxCities,
             'base' => $this->baseUrl(),
         ]));
+        $lastSuccessKey = 'monitor:cities-analytics:last-success';
 
-        $payload = Cache::remember($cacheKey, now()->addSeconds($cacheTtlSeconds), function () use ($query, $limit) {
+        $payload = Cache::remember($cacheKey, now()->addSeconds($cacheTtlSeconds), function () use ($query, $limit, $maxCities, $lastSuccessKey) {
             $dashboardResp = Http::timeout(25)->get($this->baseUrl() . '/api/dashboard');
             if (!$dashboardResp->successful()) {
                 return [
@@ -90,9 +94,13 @@ class MonitorController extends Controller
             $dashboard = $dashboardResp->json();
             $mapData = $dashboard['mapData'] ?? [];
             $cityNames = collect($mapData)
+                ->sortByDesc(function ($c) {
+                    return (float) ($c['mm_chuva'] ?? 0) + ((float) ($c['vento_speed'] ?? 0) * 0.5);
+                })
                 ->pluck('nome')
                 ->filter(fn($n) => !empty($n))
                 ->unique()
+                ->take($maxCities)
                 ->values()
                 ->all();
 
@@ -102,7 +110,8 @@ class MonitorController extends Controller
                     return collect($chunk)->map(function ($name) use ($pool, $query) {
                         return $pool
                             ->as((string) $name)
-                            ->timeout(20)
+                            ->connectTimeout(4)
+                            ->timeout(8)
                             ->get($this->baseUrl() . '/api/city/' . urlencode((string) $name), $query);
                     })->all();
                 });
@@ -122,9 +131,18 @@ class MonitorController extends Controller
                         'vento_speed' => $json['vento_speed'] ?? null,
                         'total_periodo' => (int) ($json['tickets']['total_periodo'] ?? 0),
                         'avg_periodo' => (int) ($json['tickets']['avg_periodo'] ?? 0),
+                        'today_so_far' => (int) ($json['tickets']['todaySoFar'] ?? 0),
                         'today_forecast' => (int) ($json['tickets']['todayForecast'] ?? 0),
                     ];
                 }
+            }
+
+            if (count($detailsByCity) === 0) {
+                return [
+                    '__error' => true,
+                    'status_code' => 504,
+                    '__empty' => true,
+                ];
             }
 
             $count = count($detailsByCity);
@@ -158,18 +176,30 @@ class MonitorController extends Controller
                 ->values()
                 ->all();
 
-            return [
+            $result = [
                 'resumo' => [
                     'cidades_analisadas' => $count,
                     'media_global_total_periodo' => $mediaGlobalTotal,
+                    'escopo_analise' => "Top {$maxCities} cidades por severidade climática atual",
                 ],
                 'top_entrantes' => $topEntrantes,
                 'acima_media_operacional' => $acimaMediaOperacional,
                 'acima_media_global' => $acimaMediaGlobal,
             ];
+
+            Cache::put($lastSuccessKey, $result, now()->addHours(6));
+
+            return $result;
         });
 
         if (($payload['__error'] ?? false) === true) {
+            $stale = Cache::get($lastSuccessKey);
+            if ($stale) {
+                $stale['resumo']['cache_stale'] = true;
+                $stale['resumo']['cache_notice'] = 'Exibindo ultimo resultado consolidado por timeout/falha na atualização.';
+                return response()->json($stale);
+            }
+
             return response()->json([
                 'message' => 'Falha ao buscar dashboard para analytics',
                 'status_code' => $payload['status_code'] ?? 502,

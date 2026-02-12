@@ -15,7 +15,9 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // $schedule->command('inspire')->hourly();
+        $schedule->command('monitor:warm-analytics --cache_ttl=3600 --limit=10 --max_cities=18')
+            ->hourlyAt(0)
+            ->withoutOverlapping();
     }
 
     /**
