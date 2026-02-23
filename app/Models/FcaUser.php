@@ -26,4 +26,9 @@ class FcaUser extends Authenticatable
         'remember_token',
         'token',
     ];
+
+    public function coordinator()
+    {
+        return $this->belongsTo(self::class, 'nivel_hierarquia');
+    }
 }

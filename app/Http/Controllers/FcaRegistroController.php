@@ -191,15 +191,20 @@ public function update(Request $request, $id)
             return response()->json(['error' => 'Acesso não autorizado.'], 403);
         }
 
-        $registros = FcaRegistro::with('supervisor')
+        $registros = FcaRegistro::with(['supervisor.coordinator'])
             ->orderBy('data_inicio', 'desc')
             ->get();
         
         $formattedRegistros = $registros->map(function ($registro) {
+            $supervisor = $registro->supervisor;
+            $coordinator = $supervisor ? $supervisor->coordinator : null;
+
             return [
                 'id' => $registro->id,
                 'id_supervisor' => $registro->id_supervisor,
-                'nome_supervisor' => $registro->supervisor->nome ?? 'N/A',
+                'nome_supervisor' => $supervisor->nome ?? 'N/A',
+                'id_coordenador' => $coordinator->id ?? null,
+                'nome_coordenador' => $coordinator->nome ?? 'N/A',
                 'nome_tecnico' => $registro->nome_tecnico,
                 'fato' => $registro->fato,
                 'causa' => $registro->causa,

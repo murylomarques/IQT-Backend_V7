@@ -125,6 +125,7 @@ class FcaController extends Controller
             'email' => 'sometimes|required|email|unique:fca_users,email,' . $user->id,
             'password' => 'sometimes|required|string|min:6',
             'cargo' => 'sometimes|required|string|max:100', // <-- ADICIONADO
+            'nivel_hierarquia' => 'sometimes|nullable|integer|exists:fca_users,id',
         ]);
 
         $dataToUpdate = [];
@@ -142,13 +143,17 @@ class FcaController extends Controller
             $dataToUpdate['cargo'] = $validated['cargo']; // <-- ADICIONADO
         }
 
+        if ($request->has('nivel_hierarquia')) {
+            $dataToUpdate['nivel_hierarquia'] = $request->nivel_hierarquia ?: null;
+        }
+
         if (!empty($dataToUpdate)) {
             $user->update($dataToUpdate);
         }
 
         return response()->json([
             'message' => 'Usuário atualizado com sucesso!',
-            'user' => $user->only(['id', 'nome', 'email', 'usuario', 'cargo'])
+            'user' => $user->only(['id', 'nome', 'email', 'usuario', 'cargo', 'nivel_hierarquia'])
         ]);
     }
 }
