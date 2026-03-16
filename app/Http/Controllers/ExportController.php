@@ -321,6 +321,7 @@ class ExportController extends Controller
         $columns = [
             'ID', 'Data', 'Inspetor', 'Regional', 'Cidade', 'T?cnico', 'CPF T?cnico', 'Empresa',
             'Supervisor', 'Placa', 'Despache', 'T?cnico no Local', 'Atividade Externa',
+            'Motivo sem atividade externa',
             'Uso Capacete', 'Uso Cinto', 'Uso Talabarte', 'Uso Botas', 'Escada Est?vel',
             'Escada Amarrada', 'Cones Sinaliza??o', 'Escada Bom Estado', 'Observa??es',
             'Tipo V?lido',
@@ -349,6 +350,7 @@ class ExportController extends Controller
                     $vistoria->modo_despache ?? '',
                     $vistoria->tecnico_no_local ?? '',
                     $vistoria->atividade_externa ?? '',
+                    $vistoria->motivo_sem_atividade_externa ?? '',
                     $vistoria->uso_capacete ?? '',
                     $vistoria->uso_cinto ?? '',
                     $vistoria->uso_talabarte ?? '',

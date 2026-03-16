@@ -157,7 +157,7 @@ class AgendaController extends Controller
      */
     public function destroy(Agenda $agenda)
     {
-        $ageenda->delete();
+        $agenda->delete();
         return response()->json(['message' => 'Agendamento cancelado/removido com sucesso.'], 200);
     }
 
