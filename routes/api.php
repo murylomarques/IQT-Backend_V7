@@ -19,6 +19,9 @@ use App\Http\Controllers\VistoriaSegurancaController;
 use App\Http\Controllers\ExportController;
 use App\Http\Controllers\FcaController;
 use App\Http\Controllers\FcaHierarchyController;
+use App\Http\Controllers\FcaFormController;
+use App\Http\Controllers\FcaChecklistController;
+use App\Http\Controllers\FcaPoController;
 use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\AdminOverviewController;
 use App\Http\Controllers\ChatController;
@@ -169,6 +172,21 @@ Route::middleware('api')->group(function () {
         Route::get('/fca/link-requests', [FcaHierarchyController::class, 'getLinkRequests'])->middleware('fca.admin');
         Route::put('/fca/link-requests/{id}/approve', [FcaHierarchyController::class, 'approveLinkRequest'])->middleware('fca.admin');
         Route::put('/fca/link-requests/{id}/reject', [FcaHierarchyController::class, 'rejectLinkRequest'])->middleware('fca.admin');
+
+        // ── FCA Form (checklist / PO) ──────────────────────────────────────
+        Route::get('/fcaf/period/active',    [FcaFormController::class, 'activePeriod']);
+        Route::get('/fcaf/periods',          [FcaFormController::class, 'periodHistory'])->middleware('fca.admin');
+        Route::post('/fcaf/period/upload',   [FcaFormController::class, 'uploadBase'])->middleware('fca.admin');
+        Route::get('/fcaf/tecnicos',         [FcaFormController::class, 'myTecnicos']);
+        Route::get('/fcaf/analytics',        [FcaFormController::class, 'analytics']);
+        Route::get('/fcaf/analytics/all',    [FcaFormController::class, 'analyticsAll'])->middleware('fca.admin');
+        Route::get('/fcaf/tecnico/{id}',     [FcaFormController::class, 'tecnicoDetail']);
+
+        Route::get('/fcaf/tecnico/{id}/checklist', [FcaChecklistController::class, 'getForTecnico']);
+        Route::post('/fcaf/checklist',             [FcaChecklistController::class, 'store']);
+
+        Route::get('/fcaf/tecnico/{id}/pos',  [FcaPoController::class, 'getForTecnico']);
+        Route::post('/fcaf/po',               [FcaPoController::class, 'store']);
     });
 
 });
