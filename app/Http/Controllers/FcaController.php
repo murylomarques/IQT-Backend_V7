@@ -71,12 +71,21 @@ class FcaController extends Controller
         ];
 
         // Visible users depends on role
+        // For supervisors and coordinators, also include unlinked users
+        // so the "Vincular" tab can show them in the dropdown
         $visibleUsers = match ($user->role) {
             'admin', 'consulta' => $allUsers,
-            'coordenacao'       => FcaUser::where('manager_id', $user->id)->get()
-                ->concat(FcaUser::whereIn('manager_id', FcaUser::where('manager_id', $user->id)->pluck('id'))->get()),
-            'supervisao'        => FcaUser::where('manager_id', $user->id)->get(),
-            default             => collect([$user]),
+
+            'coordenacao' => FcaUser::where('manager_id', $user->id)->get()
+                ->concat(FcaUser::whereIn('manager_id', FcaUser::where('manager_id', $user->id)->pluck('id'))->get())
+                ->concat(FcaUser::where('role', 'supervisao')->whereNull('manager_id')->get())
+                ->unique('id'),
+
+            'supervisao' => FcaUser::where('manager_id', $user->id)
+                ->orWhere(fn($q) => $q->where('role', 'tecnico')->whereNull('manager_id'))
+                ->get(),
+
+            default => collect([$user]),
         };
 
         return response()->json([
