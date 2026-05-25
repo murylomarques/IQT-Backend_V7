@@ -18,7 +18,7 @@ use App\Http\Controllers\CargoController;
 use App\Http\Controllers\VistoriaSegurancaController;
 use App\Http\Controllers\ExportController;
 use App\Http\Controllers\FcaController;
-use App\Http\Controllers\FcaRegistroController;
+use App\Http\Controllers\FcaHierarchyController;
 use App\Http\Controllers\AccessRequestController;
 use App\Http\Controllers\AdminOverviewController;
 use App\Http\Controllers\ChatController;
@@ -141,16 +141,34 @@ Route::middleware('api')->group(function () {
     Route::post('/loginfca', [FcaController::class, 'login'])->middleware('throttle:loginfca');
 
     Route::middleware('fca.auth')->group(function () {
-        Route::post('/fca/usuario', [FcaController::class, 'criarUsuario'])->middleware('fca.admin');
-        Route::post('/fca/users', [FcaController::class, 'criarUsuario'])->middleware('fca.admin');
-        Route::get('/fca/registros', [FcaRegistroController::class, 'index']);
-        Route::post('/fca/registros', [FcaRegistroController::class, 'store']);
-        Route::put('/fca/registros/{id}', [FcaRegistroController::class, 'update']);
-        Route::delete('/fca/registros/{id}', [FcaRegistroController::class, 'destroy']);
-        Route::get('/fca/registros/coordenador', [FcaRegistroController::class, 'indexCoordenador']);
-        Route::get('/fca/registros/all', [FcaRegistroController::class, 'indexAll'])->middleware('fca.admin');
+        // Current user
+        Route::get('/fca/me', [FcaController::class, 'me']);
+
+        // Dashboard metrics
+        Route::get('/fca/dashboard', [FcaController::class, 'dashboard']);
+
+        // Monthly window
+        Route::get('/fca/window', [FcaController::class, 'getWindow']);
+        Route::put('/fca/window', [FcaController::class, 'updateWindow'])->middleware('fca.admin');
+
+        // User management (admin only)
         Route::get('/fca/users', [FcaController::class, 'indexUsers'])->middleware('fca.admin');
-        Route::put('fca/users/{userId}', [FcaController::class, 'updateUser'])->middleware('fca.admin');
+        Route::post('/fca/users', [FcaController::class, 'createUser'])->middleware('fca.admin');
+        Route::put('/fca/users/{id}', [FcaController::class, 'updateUser'])->middleware('fca.admin');
+        Route::delete('/fca/users/{id}', [FcaController::class, 'deleteUser'])->middleware('fca.admin');
+        Route::post('/fca/users/import-csv', [FcaController::class, 'importCsv'])->middleware('fca.admin');
+        Route::get('/fca/users/export-csv', [FcaController::class, 'exportCsv'])->middleware('fca.admin');
+
+        // Hierarchy
+        Route::get('/fca/hierarchy', [FcaHierarchyController::class, 'getSubordinates']);
+        Route::get('/fca/hierarchy/all', [FcaHierarchyController::class, 'getAllHierarchy'])->middleware('fca.admin');
+        Route::post('/fca/hierarchy/link', [FcaHierarchyController::class, 'link']);
+        Route::delete('/fca/hierarchy/unlink/{childId}', [FcaHierarchyController::class, 'unlink']);
+
+        // Link requests (admin)
+        Route::get('/fca/link-requests', [FcaHierarchyController::class, 'getLinkRequests'])->middleware('fca.admin');
+        Route::put('/fca/link-requests/{id}/approve', [FcaHierarchyController::class, 'approveLinkRequest'])->middleware('fca.admin');
+        Route::put('/fca/link-requests/{id}/reject', [FcaHierarchyController::class, 'rejectLinkRequest'])->middleware('fca.admin');
     });
 
 });
