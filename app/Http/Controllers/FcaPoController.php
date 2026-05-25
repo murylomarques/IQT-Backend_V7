@@ -13,7 +13,7 @@ class FcaPoController extends Controller
     public function getForTecnico(Request $req, $tecnicoId)
     {
         $pos = FcaPo::where('tecnico_id', $tecnicoId)
-            ->where('supervisor_id', $req->user()->id)
+            ->where('supervisor_id', $req->attributes->get('fca_user')->id)
             ->orderBy('po_date', 'desc')
             ->get()
             ->map(fn($p) => [
@@ -47,7 +47,7 @@ class FcaPoController extends Controller
         // Non-certified: block if already has a PO on the same date
         if (!$tec->isCertificado()) {
             $sameDay = FcaPo::where('tecnico_id', $req->tecnico_id)
-                ->where('supervisor_id', $req->user()->id)
+                ->where('supervisor_id', $req->attributes->get('fca_user')->id)
                 ->whereDate('po_date', $req->po_date)
                 ->exists();
 
@@ -60,7 +60,7 @@ class FcaPoController extends Controller
 
         $po = FcaPo::create([
             'fca_period_id' => $period->id,
-            'supervisor_id' => $req->user()->id,
+            'supervisor_id' => $req->attributes->get('fca_user')->id,
             'tecnico_id'    => $req->tecnico_id,
             'answers'       => $req->answers,
             'po_date'       => $req->po_date,

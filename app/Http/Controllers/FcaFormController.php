@@ -76,7 +76,7 @@ class FcaFormController extends Controller
 
         $period = FcaPeriod::create([
             'mes'         => $mes,
-            'uploaded_by' => $req->user()->id,
+            'uploaded_by' => $req->attributes->get('fca_user')->id,
             'expires_at'  => now()->addDays(25),
             'is_active'   => true,
         ]);
@@ -115,7 +115,7 @@ class FcaFormController extends Controller
     // ── GET /fcaf/tecnicos ────────────────────────────────────────────────────
     public function myTecnicos(Request $req)
     {
-        $user   = $req->user();
+        $user   = $req->attributes->get('fca_user');
         $period = FcaPeriod::where('is_active', true)->latest()->first();
         if (!$period) return response()->json([]);
 
@@ -138,7 +138,7 @@ class FcaFormController extends Controller
     // ── GET /fcaf/tecnico/{id} ────────────────────────────────────────────────
     public function tecnicoDetail(Request $req, $id)
     {
-        $user   = $req->user();
+        $user   = $req->attributes->get('fca_user');
         $period = FcaPeriod::where('is_active', true)->latest()->first();
         $tec    = FcaPeriodTecnico::findOrFail($id);
 
@@ -148,7 +148,7 @@ class FcaFormController extends Controller
     // ── GET /fcaf/analytics ──────────────────────────────────────────────────
     public function analytics(Request $req)
     {
-        $user   = $req->user();
+        $user   = $req->attributes->get('fca_user');
         $period = FcaPeriod::where('is_active', true)->latest()->first();
         if (!$period) {
             return response()->json(['period' => null, 'metrics' => null, 'tecnicos' => []]);

@@ -13,7 +13,7 @@ class FcaChecklistController extends Controller
     public function getForTecnico(Request $req, $tecnicoId)
     {
         $checklist = FcaChecklist::where('tecnico_id', $tecnicoId)
-            ->where('supervisor_id', $req->user()->id)
+            ->where('supervisor_id', $req->attributes->get('fca_user')->id)
             ->first();
 
         if (!$checklist) return response()->json(null);
@@ -43,14 +43,14 @@ class FcaChecklistController extends Controller
         }
 
         $existing = FcaChecklist::where('tecnico_id', $req->tecnico_id)
-            ->where('supervisor_id', $req->user()->id)
+            ->where('supervisor_id', $req->attributes->get('fca_user')->id)
             ->first();
 
         if ($existing) return response()->json(['error' => 'Checklist já preenchido para este técnico neste período.'], 422);
 
         $checklist = FcaChecklist::create([
             'fca_period_id' => $period->id,
-            'supervisor_id' => $req->user()->id,
+            'supervisor_id' => $req->attributes->get('fca_user')->id,
             'tecnico_id'    => $req->tecnico_id,
             'answers'       => $req->answers,
         ]);
