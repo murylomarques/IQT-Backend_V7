@@ -12,7 +12,11 @@ class FcaChecklistController extends Controller
     // GET /fcaf/tecnico/{id}/checklist
     public function getForTecnico(Request $req, $tecnicoId)
     {
-        $checklist = FcaChecklist::where('tecnico_id', $tecnicoId)
+        $period = FcaPeriod::where('is_active', true)->latest()->first();
+        if (!$period) return response()->json(null);
+
+        $checklist = FcaChecklist::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $tecnicoId)
             ->where('supervisor_id', $req->attributes->get('fca_user')->id)
             ->first();
 
@@ -42,7 +46,8 @@ class FcaChecklistController extends Controller
             return response()->json(['error' => 'Técnico não pertence ao período ativo.'], 422);
         }
 
-        $existing = FcaChecklist::where('tecnico_id', $req->tecnico_id)
+        $existing = FcaChecklist::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $req->tecnico_id)
             ->where('supervisor_id', $req->attributes->get('fca_user')->id)
             ->first();
 

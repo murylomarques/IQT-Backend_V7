@@ -247,8 +247,8 @@ class FcaFormController extends Controller
     // ── Helpers ───────────────────────────────────────────────────────────────
     private function formatTecnico(FcaPeriodTecnico $t, int $supId, FcaPeriod $period): array
     {
-        $checklist    = FcaChecklist::where('tecnico_id', $t->id)->where('supervisor_id', $supId)->first();
-        $pos          = FcaPo::where('tecnico_id', $t->id)->where('supervisor_id', $supId)->get();
+        $checklist    = FcaChecklist::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->first();
+        $pos          = FcaPo::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->get();
         $distinctDays = $pos->pluck('po_date')->map(fn($d) => $d->toDateString())->unique()->count();
         $requiredPos  = $t->requiredPos();
 
