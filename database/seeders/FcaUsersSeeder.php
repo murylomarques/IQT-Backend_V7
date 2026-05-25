@@ -47,6 +47,18 @@ class FcaUsersSeeder extends Seeder
                 'title'       => 'Supervisor de Equipe',
                 'manager_id'  => null,
             ],
+            [
+                'name'        => 'Tecnico Teste',
+                'usuario'     => 'tec.teste',
+                'email'       => 'tecnico@fca.desktop.com.br',
+                'password'    => Hash::make('Tec@123'),
+                'role'        => 'tecnico',
+                'employee_id' => '0004',
+                'territory'   => 'CAMPINAS',
+                'regional'    => 'SUDESTE',
+                'title'       => 'Técnico de Campo',
+                'manager_id'  => null,
+            ],
         ];
 
         foreach ($users as $data) {
@@ -60,9 +72,10 @@ class FcaUsersSeeder extends Seeder
         $this->command->table(
             ['Usuário', 'Senha', 'Perfil'],
             [
-                ['admin.fca',  'Admin@123', 'Administrador'],
-                ['coord.fca',  'Coord@123', 'Coordenação'],
-                ['super.fca',  'Super@123', 'Supervisão'],
+                ['admin.fca', 'Admin@123', 'Administrador'],
+                ['coord.fca', 'Coord@123', 'Coordenação'],
+                ['super.fca', 'Super@123', 'Supervisão'],
+                ['tec.teste', 'Tec@123',   'Técnico'],
             ]
         );
     }
