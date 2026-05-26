@@ -130,7 +130,7 @@ Route::middleware('api')->group(function () {
 
         Route::get('/agenda/{agenda}', [AgendaController::class, 'show']);
         Route::post('/agenda', [AgendaController::class, 'store']);
-        Route::delete('/agenda/{id}', [AgendaController::class, 'destroy']);
+        Route::delete('/agenda/{agenda}', [AgendaController::class, 'destroy']);
 
         Route::middleware(IsAdmin::class)->group(function () {
             Route::get('/admin/overview', [AdminOverviewController::class, 'index']);
