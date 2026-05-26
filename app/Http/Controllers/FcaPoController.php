@@ -48,11 +48,22 @@ class FcaPoController extends Controller
             return response()->json(['error' => 'Técnico não pertence ao período ativo.'], 422);
         }
 
+        $supervisorId = $req->attributes->get('fca_user')->id;
+
+        $hasChecklist = \App\Models\FcaChecklist::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $req->tecnico_id)
+            ->where('supervisor_id', $supervisorId)
+            ->exists();
+
+        if (!$hasChecklist) {
+            return response()->json(['error' => 'Preencha o Checklist deste técnico antes de registrar um PO.'], 422);
+        }
+
         // Non-certified: block if already has a PO on the same date
         if (!$tec->isCertificado()) {
             $sameDay = FcaPo::where('fca_period_id', $period->id)
                 ->where('tecnico_id', $req->tecnico_id)
-                ->where('supervisor_id', $req->attributes->get('fca_user')->id)
+                ->where('supervisor_id', $supervisorId)
                 ->whereDate('po_date', $req->po_date)
                 ->exists();
 
@@ -65,7 +76,7 @@ class FcaPoController extends Controller
 
         $po = FcaPo::create([
             'fca_period_id' => $period->id,
-            'supervisor_id' => $req->attributes->get('fca_user')->id,
+            'supervisor_id' => $supervisorId,
             'tecnico_id'    => $req->tecnico_id,
             'answers'       => $req->answers,
             'po_date'       => $req->po_date,
