@@ -131,6 +131,8 @@ class ExportController extends Controller
             'Data Envio (ag_servicos)',
 
             'Observações Gerais',
+            'Retorno Técnico',
+            'Metros de Drop',
 
             'Resultado da Vistoria',
             'Classificação (Leve/Moderada/Grave)',
@@ -254,6 +256,8 @@ class ExportController extends Controller
                             $ag->data_envio ?? '',
 
                             $vistoria->observacoes_gerais ?? '',
+                            $vistoria->retorno_tecnico ?? '',
+                            $vistoria->metros_drop !== null ? $vistoria->metros_drop . ' m' : '',
 
                             $resultadoVistoria,
                             $classificacao,

@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Vistoria extends Model
 {
     use HasFactory;
-    protected $fillable = ['agenda_id', 'fiscal_id', 'tipo', 'observacoes_gerais', 'status_laudo' ];
+    protected $fillable = ['agenda_id', 'fiscal_id', 'tipo', 'metros_drop', 'retorno_tecnico', 'observacoes_gerais', 'status_laudo'];
 
     /**
      * Define a relação: uma Vistoria tem muitos itens de checklist.

@@ -53,13 +53,15 @@ class VistoriaController extends Controller
     public function store(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'agenda_id' => 'required|exists:agenda,id',
-            'tipo' => 'required|string|in:completa,externa,interna',
+            'agenda_id'        => 'required|exists:agenda,id',
+            'tipo'             => 'required|string|in:completa,externa,interna',
+            'metros_drop'      => 'nullable|integer|min:0',
+            'retorno_tecnico'  => 'nullable|string|max:100',
             'observacoes_gerais' => 'nullable|string',
-            'checklist' => 'required|array',
-            'checklist.*.status' => 'required|string|in:Conforme,Não Conforme,Não se Aplica,NÃ£o Conforme,NÃ£o se Aplica',
+            'checklist'        => 'required|array',
+            'checklist.*.status'    => 'required|string|in:Conforme,Não Conforme,Não se Aplica,NÃ£o Conforme,NÃ£o se Aplica',
             'checklist.*.observacao' => 'nullable|string|max:1000',
-            'checklist.*.foto' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
+            'checklist.*.foto'      => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -81,11 +83,13 @@ class VistoriaController extends Controller
         $statusInicialLaudo = $temNaoConforme ? 'Em Correção' : 'Finalizado';
 
         $vistoria = Vistoria::create([
-            'agenda_id' => $agenda->id,
-            'fiscal_id' => Auth::id(),
-            'tipo' => $validatedData['tipo'],
+            'agenda_id'        => $agenda->id,
+            'fiscal_id'        => Auth::id(),
+            'tipo'             => $validatedData['tipo'],
+            'metros_drop'      => $validatedData['metros_drop'] ?? null,
+            'retorno_tecnico'  => $validatedData['retorno_tecnico'] ?? null,
             'observacoes_gerais' => $validatedData['observacoes_gerais'] ?? null,
-            'status_laudo' => $statusInicialLaudo,
+            'status_laudo'     => $statusInicialLaudo,
         ]);
 
         foreach ($validatedData['checklist'] as $key => $itemData) {
