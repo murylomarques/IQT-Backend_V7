@@ -244,16 +244,17 @@ class FcaController extends Controller
 
     public function importCsv(Request $request)
     {
+        // Remove limite de tempo — importar 4000+ usuários leva mais de 30s
+        set_time_limit(0);
+
         $request->validate(['file' => 'required|file']);
 
-        $path = $request->file('file')->getRealPath();
-
-        // Auto-detect delimiter (semicolon vs comma)
+        $path      = $request->file('file')->getRealPath();
         $firstLine = file_get_contents($path, false, null, 0, 2048);
         $delimiter = substr_count($firstLine, ';') >= substr_count($firstLine, ',') ? ';' : ',';
 
         $handle  = fopen($path, 'r');
-        $rawHdrs = fgetcsv($handle, 4096, $delimiter);
+        $rawHdrs = fgetcsv($handle, 0, $delimiter);
         if (!$rawHdrs) {
             fclose($handle);
             return response()->json(['message' => 'Arquivo vazio ou inválido.', 'created' => 0, 'updated' => 0, 'errors' => []]);
@@ -262,67 +263,70 @@ class FcaController extends Controller
         $headers    = array_map(fn($h) => $this->normalizeHeader($h), $rawHdrs);
         $numHeaders = count($headers);
 
-        $created = 0;
-        $updated = 0;
-        $errors  = [];
+        // Pré-carrega IDs existentes em memória: evita N+1 queries no loop
+        $byEmpId   = FcaUser::whereNotNull('employee_id')->pluck('id', 'employee_id')->toArray();
+        $byUsuario = FcaUser::pluck('id', 'usuario')->toArray();
 
-        while (($row = fgetcsv($handle, 4096, $delimiter)) !== false) {
+        $toInsert = [];   // novos usuários
+        $toUpdate = [];   // [id => payload]
+        $errors   = [];
+        $now      = now()->toDateTimeString();
+
+        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
             if (count($row) < $numHeaders) continue;
 
-            // Combina só as primeiras N colunas (ignora extras)
             $raw = array_combine($headers, array_map('trim', array_slice($row, 0, $numHeaders)));
             if (!is_array($raw)) continue;
 
             try {
-                $matricula   = $raw['matricula']   ?? $raw['usuario']    ?? '';
-                $nome        = $raw['colaborador']  ?? $raw['nome']      ?? $raw['name'] ?? '';
-                $cpfRaw      = $raw['cpf']          ?? '';
-                $cpf         = $cpfRaw !== '' ? $cpfRaw : null;
-                // Senha = somente os dígitos do CPF
-                $senhaCpf    = preg_replace('/\D/', '', $cpfRaw);
-                $cargo       = $raw['cargo']        ?? $raw['title']     ?? $raw['role'] ?? '';
-                $email       = (!empty($raw['email'])) ? trim($raw['email']) : null;
-                $territorio  = $raw['territorio']   ?? $raw['territory'] ?? null;
-                $regional    = (!empty($raw['regional'])) ? $raw['regional'] : null;
-                $empresa     = (!empty($raw['empresa'])) ? $raw['empresa'] : null;
-                $employee_id = (!empty($raw['employee_id'])) ? $raw['employee_id'] : ($matricula ?: null);
-                $role        = $this->inferRole($cargo);
+                $matricula  = $raw['matricula']   ?? $raw['usuario']    ?? '';
+                $nome       = $raw['colaborador']  ?? $raw['nome']      ?? $raw['name'] ?? '';
+                $cpfRaw     = trim($raw['cpf']     ?? '');
+                $cpf        = $cpfRaw !== '' ? $cpfRaw : null;
+                $senhaCpf   = preg_replace('/\D/', '', $cpfRaw);
+                $cargo      = $raw['cargo']        ?? $raw['title']     ?? $raw['role'] ?? '';
+                $email      = (!empty($raw['email'])) ? trim($raw['email']) : null;
+                $territorio = (!empty($raw['territorio'])) ? $raw['territorio'] : ((!empty($raw['territory'])) ? $raw['territory'] : null);
+                $regional   = (!empty($raw['regional'])) ? $raw['regional'] : null;
+                $empresa    = (!empty($raw['empresa'])) ? $raw['empresa'] : null;
+                $empId      = (!empty($raw['employee_id'])) ? $raw['employee_id'] : ($matricula ?: null);
+                $usuario    = $matricula ?: $empId;
+                $role       = $this->inferRole($cargo);
 
-                if (empty($matricula) && empty($nome)) continue;
+                if (empty($usuario) && empty($nome)) continue;
 
-                // Upsert — queries separadas para evitar OR() vazio (bug SQL)
-                $existing = null;
-                if ($employee_id) {
-                    $existing = FcaUser::where('employee_id', $employee_id)->first();
-                }
-                if (!$existing && $matricula) {
-                    $existing = FcaUser::where('usuario', $matricula)->first();
-                }
-                if (!$existing && $email) {
-                    $existing = FcaUser::where('email', $email)->first();
-                }
+                // Busca em memória — O(1), sem queries extras
+                $existingId = ($empId ? ($byEmpId[$empId] ?? null) : null)
+                           ?? ($usuario ? ($byUsuario[$usuario] ?? null) : null);
 
                 $payload = [
                     'name'        => $nome,
-                    'usuario'     => $matricula ?: $employee_id,
+                    'usuario'     => $usuario,
                     'email'       => $email,
                     'role'        => $role,
-                    'employee_id' => $employee_id,
+                    'employee_id' => $empId,
                     'cpf'         => $cpf,
                     'empresa'     => $empresa,
-                    'territory'   => ($territorio !== '' && $territorio !== null) ? $territorio : null,
+                    'territory'   => $territorio,
                     'regional'    => $regional,
                     'title'       => ($cargo !== '') ? $cargo : null,
                 ];
 
-                if ($existing) {
-                    $existing->update($payload);
-                    $updated++;
+                if ($existingId) {
+                    $toUpdate[$existingId] = $payload;
                 } else {
-                    // Senha = dígitos do CPF; fallback 'Mudar@123' se CPF vazio
-                    $payload['password'] = Hash::make($senhaCpf ?: 'Mudar@123');
-                    FcaUser::create($payload);
-                    $created++;
+                    // Evita duplicatas dentro do mesmo arquivo
+                    if (($empId && isset($byEmpId[$empId])) || ($usuario && isset($byUsuario[$usuario]))) continue;
+
+                    // rounds=8 é 4× mais rápido que o padrão (10) e seguro para senha temporária
+                    $payload['password']   = Hash::make($senhaCpf ?: 'Mudar@123', ['rounds' => 8]);
+                    $payload['created_at'] = $now;
+                    $payload['updated_at'] = $now;
+                    $toInsert[] = $payload;
+
+                    // Marca no índice local para não inserir duplicata do mesmo arquivo
+                    if ($empId)   $byEmpId[$empId]     = -1;
+                    if ($usuario) $byUsuario[$usuario]  = -1;
                 }
             } catch (\Throwable $e) {
                 $errors[] = ($raw['colaborador'] ?? $raw['name'] ?? 'linha') . ': ' . $e->getMessage();
@@ -331,8 +335,39 @@ class FcaController extends Controller
 
         fclose($handle);
 
+        $created = 0;
+        $updated = 0;
+
+        // Insert em lotes de 200 (evita query gigante)
+        foreach (array_chunk($toInsert, 200) as $chunk) {
+            try {
+                FcaUser::insert($chunk);
+                $created += count($chunk);
+            } catch (\Throwable $e) {
+                // Fallback: tenta um por um para identificar o registro problemático
+                foreach ($chunk as $item) {
+                    try {
+                        FcaUser::insert([$item]);
+                        $created++;
+                    } catch (\Throwable $ie) {
+                        $errors[] = ($item['name'] ?? 'linha') . ': ' . $ie->getMessage();
+                    }
+                }
+            }
+        }
+
+        // Updates individuais (payloads diferentes por registro)
+        foreach ($toUpdate as $id => $payload) {
+            try {
+                FcaUser::where('id', $id)->update($payload);
+                $updated++;
+            } catch (\Throwable $e) {
+                $errors[] = ($payload['name'] ?? 'ID '.$id) . ': ' . $e->getMessage();
+            }
+        }
+
         return response()->json([
-            'message' => "Importação concluída. Criados: {$created}, Atualizados: {$updated}.",
+            'message' => "Importação concluída. Criados: {$created}, Atualizados: {$updated}." . (count($errors) ? " Erros: " . count($errors) . "." : ''),
             'created' => $created,
             'updated' => $updated,
             'errors'  => $errors,
