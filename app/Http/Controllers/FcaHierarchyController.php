@@ -110,6 +110,80 @@ class FcaHierarchyController extends Controller
         ], 202);
     }
 
+    public function bulkLink(Request $request)
+    {
+        $actor = $request->attributes->get('fca_user');
+
+        $request->validate([
+            'parent_id'   => 'required|integer|exists:fca_users,id',
+            'child_ids'   => 'required|array|min:1',
+            'child_ids.*' => 'integer|exists:fca_users,id',
+        ]);
+
+        $parent = FcaUser::findOrFail($request->parent_id);
+
+        if ($actor->role !== 'admin' && (int) $actor->id !== (int) $parent->id) {
+            return response()->json(['error' => 'Você só pode criar vínculos como superior direto.'], 403);
+        }
+
+        $allowed = [
+            'supervisao'  => ['tecnico'],
+            'coordenacao' => ['supervisao'],
+            'admin'       => ['tecnico', 'supervisao', 'coordenacao'],
+        ];
+
+        $windowOpen = $this->isWindowOpen();
+        $linked = 0; $pending = 0; $failed = 0;
+
+        $children = FcaUser::whereIn('id', $request->child_ids)->get()->keyBy('id');
+
+        foreach ($request->child_ids as $childId) {
+            if ((int) $childId === (int) $parent->id) { $failed++; continue; }
+            $child = $children->get($childId);
+            if (!$child) { $failed++; continue; }
+
+            if (!isset($allowed[$parent->role]) || !in_array($child->role, $allowed[$parent->role])) {
+                $failed++; continue;
+            }
+
+            if ($actor->role === 'admin' || $windowOpen) {
+                $child->manager_id = $parent->id;
+                $child->save();
+
+                FcaLinkRequest::create([
+                    'requester_user_id'  => $actor->id,
+                    'parent_user_id'     => $parent->id,
+                    'child_user_id'      => $child->id,
+                    'parent_role'        => $parent->role,
+                    'child_role'         => $child->role,
+                    'status'             => 'approved',
+                    'requested_at'       => now(),
+                    'decided_at'         => now(),
+                    'decided_by_user_id' => $actor->id,
+                    'decision_note'      => $actor->role === 'admin' ? 'Aplicado pelo admin.' : 'Aplicado automaticamente (janela aberta).',
+                ]);
+                $linked++;
+            } else {
+                FcaLinkRequest::create([
+                    'requester_user_id' => $actor->id,
+                    'parent_user_id'    => $parent->id,
+                    'child_user_id'     => $child->id,
+                    'parent_role'       => $parent->role,
+                    'child_role'        => $child->role,
+                    'status'            => 'pending',
+                    'requested_at'      => now(),
+                ]);
+                $pending++;
+            }
+        }
+
+        return response()->json([
+            'linked'  => $linked,
+            'pending' => $pending,
+            'failed'  => $failed,
+        ]);
+    }
+
     public function unlink(Request $request, $childId)
     {
         $actor = $request->attributes->get('fca_user');

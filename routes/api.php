@@ -169,6 +169,7 @@ Route::middleware('api')->group(function () {
         Route::get('/fca/hierarchy/all', [FcaHierarchyController::class, 'getAllHierarchy'])->middleware('fca.admin');
         Route::get('/fca/hierarchy/full-tree', [FcaHierarchyController::class, 'fullTree'])->middleware('fca.admin');
         Route::post('/fca/hierarchy/link', [FcaHierarchyController::class, 'link']);
+        Route::post('/fca/hierarchy/bulk-link', [FcaHierarchyController::class, 'bulkLink']);
         Route::delete('/fca/hierarchy/unlink/{childId}', [FcaHierarchyController::class, 'unlink']);
 
         // Link requests (admin)
