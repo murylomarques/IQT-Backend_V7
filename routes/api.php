@@ -157,11 +157,12 @@ Route::middleware('api')->group(function () {
         // User management (admin only)
         Route::get('/fca/users', [FcaController::class, 'indexUsers'])->middleware('fca.admin');
         Route::post('/fca/users', [FcaController::class, 'createUser'])->middleware('fca.admin');
-        Route::put('/fca/users/{id}', [FcaController::class, 'updateUser'])->middleware('fca.admin');
-        Route::delete('/fca/users/{id}', [FcaController::class, 'deleteUser'])->middleware('fca.admin');
+        // Rotas fixas devem vir ANTES das rotas com {id}
         Route::post('/fca/users/import-csv', [FcaController::class, 'importCsv'])->middleware('fca.admin');
         Route::get('/fca/users/export-csv', [FcaController::class, 'exportCsv'])->middleware('fca.admin');
         Route::delete('/fca/users/clear-imported', [FcaController::class, 'clearImported'])->middleware('fca.admin');
+        Route::put('/fca/users/{id}', [FcaController::class, 'updateUser'])->middleware('fca.admin');
+        Route::delete('/fca/users/{id}', [FcaController::class, 'deleteUser'])->middleware('fca.admin');
 
         // Hierarchy
         Route::get('/fca/hierarchy', [FcaHierarchyController::class, 'getSubordinates']);
