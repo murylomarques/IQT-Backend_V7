@@ -13,6 +13,7 @@ class FcaUser extends Authenticatable
 
     protected $fillable = [
         'employee_id',
+        'cpf',
         'name',
         'email',
         'usuario',

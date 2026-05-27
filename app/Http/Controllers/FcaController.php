@@ -167,6 +167,7 @@ class FcaController extends Controller
             'password'    => 'required|string|min:6',
             'role'        => 'required|in:admin,coordenacao,supervisao,tecnico,consulta',
             'employee_id' => 'nullable|string|max:50',
+            'cpf'         => 'nullable|string|max:20',
             'territory'   => 'nullable|string|max:100',
             'regional'    => 'nullable|string|max:100',
             'title'       => 'nullable|string|max:150',
@@ -180,6 +181,7 @@ class FcaController extends Controller
             'password'    => Hash::make($request->password),
             'role'        => $request->role,
             'employee_id' => $request->employee_id,
+            'cpf'         => $request->cpf,
             'territory'   => $request->territory,
             'regional'    => $request->regional,
             'title'       => $request->title,
@@ -200,13 +202,14 @@ class FcaController extends Controller
             'password'    => 'sometimes|string|min:6',
             'role'        => 'sometimes|in:admin,coordenacao,supervisao,tecnico,consulta',
             'employee_id' => 'sometimes|nullable|string|max:50',
+            'cpf'         => 'sometimes|nullable|string|max:20',
             'territory'   => 'sometimes|nullable|string|max:100',
             'regional'    => 'sometimes|nullable|string|max:100',
             'title'       => 'sometimes|nullable|string|max:150',
             'manager_id'  => 'sometimes|nullable|integer|exists:fca_users,id',
         ]);
 
-        $data = $request->only(['name', 'usuario', 'email', 'role', 'employee_id', 'territory', 'regional', 'title', 'manager_id']);
+        $data = $request->only(['name', 'usuario', 'email', 'role', 'employee_id', 'cpf', 'territory', 'regional', 'title', 'manager_id']);
 
         if ($request->filled('password')) {
             $data['password'] = Hash::make($request->password);
@@ -240,45 +243,67 @@ class FcaController extends Controller
     {
         $request->validate(['file' => 'required|file|mimes:csv,txt']);
 
-        $handle = fopen($request->file('file')->getRealPath(), 'r');
-        $headers = array_map('trim', fgetcsv($handle));
+        $path = $request->file('file')->getRealPath();
+
+        // Auto-detect delimiter (semicolon vs comma)
+        $firstLine = file_get_contents($path, false, null, 0, 512);
+        $delimiter = substr_count($firstLine, ';') >= substr_count($firstLine, ',') ? ';' : ',';
+
+        $handle  = fopen($path, 'r');
+        $rawHdrs = fgetcsv($handle, 0, $delimiter);
+        // Normalize headers: strip BOM, accents, lowercase
+        $headers = array_map(fn($h) => $this->normalizeHeader($h), $rawHdrs);
+
         $created = 0;
         $updated = 0;
         $errors  = [];
 
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
             if (count($row) < count($headers)) continue;
-            $data = array_combine($headers, array_map('trim', $row));
+            $raw  = array_combine($headers, array_map('trim', $row));
 
             try {
-                $role = $this->inferRole($data['role'] ?? $data['cargo'] ?? '');
+                $matricula   = $raw['matricula']   ?? $raw['usuario']      ?? '';
+                $nome        = $raw['colaborador']  ?? $raw['nome']        ?? $raw['name'] ?? '';
+                $cpf         = $raw['cpf']          ?? null;
+                $cargo       = $raw['cargo']        ?? $raw['title']       ?? $raw['role'] ?? '';
+                $email       = $raw['email']        ?? null;
+                $territorio  = $raw['territorio']   ?? $raw['territory']   ?? null;
+                $regional    = $raw['regional']     ?? null;
+                $employee_id = $raw['employee_id']  ?? $matricula          ?: null;
+                $role        = $this->inferRole($cargo);
 
-                $existing = FcaUser::where('usuario', $data['usuario'] ?? $data['matricula'] ?? '')
-                    ->orWhere(function ($q) use ($data) {
-                        if (!empty($data['email'])) $q->where('email', $data['email']);
+                if (empty($matricula) && empty($nome)) continue;
+
+                // Upsert by employee_id / matricula, then by email
+                $existing = FcaUser::where('employee_id', $employee_id)
+                    ->orWhere('usuario', $matricula)
+                    ->orWhere(function ($q) use ($email) {
+                        if (!empty($email)) $q->where('email', $email);
                     })->first();
 
                 $payload = [
-                    'name'        => $data['name'] ?? $data['colaborador'] ?? $data['nome'] ?? '',
-                    'usuario'     => $data['usuario'] ?? $data['matricula'] ?? '',
-                    'email'       => $data['email'] ?? null,
+                    'name'        => $nome,
+                    'usuario'     => $matricula ?: $employee_id,
+                    'email'       => $email ?: null,
                     'role'        => $role,
-                    'employee_id' => $data['employee_id'] ?? $data['matricula'] ?? null,
-                    'territory'   => $data['territory'] ?? $data['territorio'] ?? null,
-                    'regional'    => $data['regional'] ?? null,
-                    'title'       => $data['title'] ?? $data['cargo'] ?? null,
+                    'employee_id' => $employee_id,
+                    'cpf'         => $cpf ?: null,
+                    'territory'   => $territorio,
+                    'regional'    => $regional,
+                    'title'       => $cargo ?: null,
                 ];
 
                 if ($existing) {
                     $existing->update($payload);
                     $updated++;
                 } else {
-                    $payload['password'] = Hash::make($data['password'] ?? 'Mudar@123');
+                    $payload['password'] = Hash::make($raw['password'] ?? 'Mudar@123');
                     FcaUser::create($payload);
                     $created++;
                 }
             } catch (\Throwable $e) {
-                $errors[] = ($data['name'] ?? 'linha') . ': ' . $e->getMessage();
+                $errors[] = ($raw['colaborador'] ?? $raw['name'] ?? 'linha') . ': ' . $e->getMessage();
             }
         }
 
@@ -295,7 +320,7 @@ class FcaController extends Controller
         $users = FcaUser::with('manager:id,name')->orderBy('name')->get();
 
         $lines   = [];
-        $lines[] = implode(',', ['id', 'name', 'usuario', 'email', 'role', 'employee_id', 'territory', 'regional', 'title', 'manager', 'created_at']);
+        $lines[] = implode(',', ['id', 'name', 'usuario', 'email', 'role', 'employee_id', 'cpf', 'territory', 'regional', 'title', 'manager', 'created_at']);
 
         foreach ($users as $u) {
             $lines[] = implode(',', [
@@ -305,6 +330,7 @@ class FcaController extends Controller
                 $u->email ?? '',
                 $u->role,
                 $u->employee_id ?? '',
+                $u->cpf ?? '',
                 $u->territory ?? '',
                 $u->regional ?? '',
                 '"' . str_replace('"', '""', $u->title ?? '') . '"',
@@ -332,6 +358,7 @@ class FcaController extends Controller
             'email'       => $user->email,
             'role'        => $user->role,
             'employee_id' => $user->employee_id,
+            'cpf'         => $user->cpf,
             'territory'   => $user->territory,
             'regional'    => $user->regional,
             'title'       => $user->title,
@@ -349,5 +376,23 @@ class FcaController extends Controller
         if (str_contains($lower, 'super'))       return 'supervisao';
         if (str_contains($lower, 'tecn'))        return 'tecnico';
         return 'consulta';
+    }
+
+    private function normalizeHeader(string $h): string
+    {
+        // Strip UTF-8 BOM if present
+        $h = ltrim($h, "\xEF\xBB\xBF");
+        $map = [
+            'á'=>'a','à'=>'a','ã'=>'a','â'=>'a','ä'=>'a',
+            'é'=>'e','è'=>'e','ê'=>'e','ë'=>'e',
+            'í'=>'i','ì'=>'i','î'=>'i','ï'=>'i',
+            'ó'=>'o','ò'=>'o','õ'=>'o','ô'=>'o','ö'=>'o',
+            'ú'=>'u','ù'=>'u','û'=>'u','ü'=>'u',
+            'ç'=>'c','ñ'=>'n',
+            'Á'=>'a','À'=>'a','Ã'=>'a','Â'=>'a',
+            'É'=>'e','Ê'=>'e','Í'=>'i','Ó'=>'o','Õ'=>'o','Ô'=>'o',
+            'Ú'=>'u','Ç'=>'c',
+        ];
+        return strtolower(trim(strtr($h, $map)));
     }
 }

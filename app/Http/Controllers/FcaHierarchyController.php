@@ -196,6 +196,16 @@ class FcaHierarchyController extends Controller
         return $day >= $start && $day <= $end;
     }
 
+    public function fullTree(Request $request)
+    {
+        $coordenadores = FcaUser::where('role', 'coordenacao')
+            ->with(['subordinates' => fn($q) => $q->with('subordinates')])
+            ->orderBy('name')
+            ->get();
+
+        return response()->json($coordenadores->map(fn($u) => $this->formatWithDepth($u, 0))->values());
+    }
+
     private function formatWithDepth(FcaUser $user, int $depth): array
     {
         return [
@@ -203,6 +213,8 @@ class FcaHierarchyController extends Controller
             'name'        => $user->name,
             'role'        => $user->role,
             'employee_id' => $user->employee_id,
+            'cpf'         => $user->cpf,
+            'regional'    => $user->regional,
             'territory'   => $user->territory,
             'manager_id'  => $user->manager_id,
             'depth'       => $depth,
