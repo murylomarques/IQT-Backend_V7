@@ -161,6 +161,7 @@ Route::middleware('api')->group(function () {
         Route::delete('/fca/users/{id}', [FcaController::class, 'deleteUser'])->middleware('fca.admin');
         Route::post('/fca/users/import-csv', [FcaController::class, 'importCsv'])->middleware('fca.admin');
         Route::get('/fca/users/export-csv', [FcaController::class, 'exportCsv'])->middleware('fca.admin');
+        Route::delete('/fca/users/clear-imported', [FcaController::class, 'clearImported'])->middleware('fca.admin');
 
         // Hierarchy
         Route::get('/fca/hierarchy', [FcaHierarchyController::class, 'getSubordinates']);

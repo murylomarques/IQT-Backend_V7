@@ -209,15 +209,16 @@ class FcaHierarchyController extends Controller
     private function formatWithDepth(FcaUser $user, int $depth): array
     {
         return [
-            'id'          => $user->id,
-            'name'        => $user->name,
-            'role'        => $user->role,
-            'employee_id' => $user->employee_id,
-            'cpf'         => $user->cpf,
-            'regional'    => $user->regional,
-            'territory'   => $user->territory,
-            'manager_id'  => $user->manager_id,
-            'depth'       => $depth,
+            'id'           => $user->id,
+            'name'         => $user->name,
+            'role'         => $user->role,
+            'employee_id'  => $user->employee_id,
+            'cpf'          => $user->cpf,
+            'empresa'      => $user->empresa,
+            'regional'     => $user->regional,
+            'territory'    => $user->territory,
+            'manager_id'   => $user->manager_id,
+            'depth'        => $depth,
             'subordinates' => $user->relationLoaded('subordinates')
                 ? $user->subordinates->map(fn($s) => $this->formatWithDepth($s, $depth + 1))->values()
                 : [],
