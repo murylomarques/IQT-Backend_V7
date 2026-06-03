@@ -93,6 +93,25 @@ return [
             // 'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'false'),
         ],
 
+        'melhoria_continua' => [
+            'driver' => 'mysql',
+            'host' => env('MCP_DB_HOST', '127.0.0.1'),
+            'port' => env('MCP_DB_PORT', '3306'),
+            'database' => env('MCP_DB_DATABASE', 'db_Melhoria_continua_operacoes'),
+            'username' => env('MCP_DB_USERNAME', 'forge'),
+            'password' => env('MCP_DB_PASSWORD', ''),
+            'unix_socket' => env('MCP_DB_SOCKET', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => false,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
     ],
 
     /*
