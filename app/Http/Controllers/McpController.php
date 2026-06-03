@@ -74,7 +74,7 @@ class McpController extends Controller
     }
 
     // GET /api/mcp/historico-diario
-    // ?regional=  &tipo_os=  &data_inicio=  &data_fim=
+    // ?regional= &tipo_os= &data_inicio= &data_fim= &mes= &ano= &pagina= &por_pagina=
     public function historicoDiario(Request $request)
     {
         $query = $this->db()->table('vw_mcp_historico_diario');
@@ -85,7 +85,32 @@ class McpController extends Controller
         if ($request->filled('tipo_os')) {
             $query->where('tipo_os', $request->tipo_os);
         }
-        return response()->json($query->get());
+        if ($request->filled('data_inicio')) {
+            $query->where('data_referencia', '>=', $request->data_inicio);
+        }
+        if ($request->filled('data_fim')) {
+            $query->where('data_referencia', '<=', $request->data_fim);
+        }
+        if ($request->filled('mes') && $request->filled('ano')) {
+            $query->whereMonth('data_referencia', $request->mes)
+                  ->whereYear('data_referencia', $request->ano);
+        }
+
+        $query->orderBy('data_referencia', 'desc');
+
+        $porPagina = min((int) $request->input('por_pagina', 500), 5000);
+        $pagina    = max((int) $request->input('pagina', 1), 1);
+
+        $total = (clone $query)->count();
+        $dados = $query->offset(($pagina - 1) * $porPagina)->limit($porPagina)->get();
+
+        return response()->json([
+            'total'      => $total,
+            'pagina'     => $pagina,
+            'por_pagina' => $porPagina,
+            'paginas'    => (int) ceil($total / $porPagina),
+            'dados'      => $dados,
+        ]);
     }
 
     // GET /api/mcp/resumo-operacional
