@@ -85,14 +85,7 @@ class McpController extends Controller
         if ($request->filled('tipo_os')) {
             $query->where('tipo_os', $request->tipo_os);
         }
-        if ($request->filled('data_inicio')) {
-            $query->where('data', '>=', $request->data_inicio);
-        }
-        if ($request->filled('data_fim')) {
-            $query->where('data', '<=', $request->data_fim);
-        }
-
-        return response()->json($query->orderBy('data', 'desc')->get());
+        return response()->json($query->get());
     }
 
     // GET /api/mcp/resumo-operacional
