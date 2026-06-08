@@ -376,25 +376,44 @@ class FcaController extends Controller
 
     public function clearImported(Request $request)
     {
-        // Deleta todos os usuários não-admin e desvincula dependências primeiro
-        $ids = FcaUser::where('role', '!=', 'admin')->pluck('id');
+        // Deleta base operacional e preserva acessos admin/consulta.
+        $ids = FcaUser::whereNotIn('role', ['admin', 'consulta'])->pluck('id');
         FcaUser::whereIn('manager_id', $ids)->update(['manager_id' => null]);
-        $deleted = FcaUser::where('role', '!=', 'admin')->delete();
+        $deleted = FcaUser::whereNotIn('role', ['admin', 'consulta'])->delete();
 
         return response()->json(['message' => "Base limpa. {$deleted} usuário(s) removido(s)."]);
     }
 
     public function exportCsv(Request $request)
     {
-        $users = FcaUser::with('manager:id,name')->orderBy('name')->get();
+        $users = FcaUser::with([
+            'manager:id,name,role,manager_id',
+            'manager.manager:id,name,role',
+        ])->where('role', 'tecnico')->orderBy('name')->get();
 
         $lines   = [];
-        $lines[] = implode(',', ['id', 'name', 'usuario', 'email', 'role', 'employee_id', 'cpf', 'territory', 'regional', 'title', 'manager', 'created_at']);
+        $lines[] = $this->csvLine([
+            'id',
+            'usuario',
+            'email',
+            'role',
+            'employee_id',
+            'cpf',
+            'territory',
+            'regional',
+            'title',
+            'tecnico',
+            'supervisor',
+            'coordenador',
+            'hierarquia_completa',
+            'created_at',
+        ]);
 
         foreach ($users as $u) {
-            $lines[] = implode(',', [
+            $hierarchy = $this->resolveHierarchyColumns($u);
+
+            $lines[] = $this->csvLine([
                 $u->id,
-                '"' . str_replace('"', '""', $u->name) . '"',
                 $u->usuario,
                 $u->email ?? '',
                 $u->role,
@@ -402,21 +421,78 @@ class FcaController extends Controller
                 $u->cpf ?? '',
                 $u->territory ?? '',
                 $u->regional ?? '',
-                '"' . str_replace('"', '""', $u->title ?? '') . '"',
-                '"' . str_replace('"', '""', $u->manager->name ?? '') . '"',
+                $u->title ?? '',
+                $hierarchy['tecnico'],
+                $hierarchy['supervisor'],
+                $hierarchy['coordenador'],
+                $hierarchy['hierarquia_completa'],
                 $u->created_at?->format('Y-m-d'),
             ]);
         }
 
         return response(implode("\n", $lines), 200, [
             'Content-Type'        => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="usuarios_fca_' . now()->format('Ymd') . '.csv"',
+            'Content-Disposition' => 'attachment; filename="usuarios_fca_hierarquia_' . now()->format('Ymd') . '.csv"',
         ]);
     }
 
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private function resolveHierarchyColumns(FcaUser $user): array
+    {
+        $tecnico = '';
+        $supervisor = '';
+        $coordenador = '';
+        $hierarquiaCompleta = '';
+
+        if ($user->role === 'tecnico') {
+            $tecnico = $user->name;
+            $manager = $user->manager;
+
+            if ($manager?->role === 'supervisao') {
+                $supervisor = $manager->name;
+
+                if ($manager->manager?->role === 'coordenacao') {
+                    $coordenador = $manager->manager->name;
+                }
+            } elseif ($manager?->role === 'coordenacao') {
+                $coordenador = $manager->name;
+            }
+
+            $hierarquiaCompleta = ($tecnico && $supervisor && $coordenador) ? 'Sim' : 'Nao';
+        } elseif ($user->role === 'supervisao') {
+            $supervisor = $user->name;
+
+            if ($user->manager?->role === 'coordenacao') {
+                $coordenador = $user->manager->name;
+            }
+
+            $hierarquiaCompleta = ($supervisor && $coordenador) ? 'Sim' : 'Nao';
+        } elseif ($user->role === 'coordenacao') {
+            $coordenador = $user->name;
+            $hierarquiaCompleta = 'Sim';
+        }
+
+        return [
+            'tecnico' => $tecnico,
+            'supervisor' => $supervisor,
+            'coordenador' => $coordenador,
+            'hierarquia_completa' => $hierarquiaCompleta,
+        ];
+    }
+
+    private function csvLine(array $fields): string
+    {
+        $handle = fopen('php://temp', 'r+');
+        fputcsv($handle, $fields, ',', '"', '');
+        rewind($handle);
+        $line = rtrim(stream_get_contents($handle), "\r\n");
+        fclose($handle);
+
+        return $line;
+    }
 
     private function formatUser(FcaUser $user): array
     {
