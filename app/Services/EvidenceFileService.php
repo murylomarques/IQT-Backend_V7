@@ -75,6 +75,63 @@ class EvidenceFileService
         return $path !== '' ? $path : null;
     }
 
+    public static function canOptimizeImages(): bool
+    {
+        return self::canOptimizeWithGd();
+    }
+
+    public static function storedFileInfo(?string $path): ?array
+    {
+        $normalizedPath = self::normalizePath($path);
+
+        if (!$normalizedPath || !Storage::disk('public')->exists($normalizedPath)) {
+            return null;
+        }
+
+        $contents = Storage::disk('public')->get($normalizedPath);
+        $mimeType = self::detectMime($contents);
+        $dimensions = self::imageDimensions($contents);
+
+        return [
+            'path' => $normalizedPath,
+            'mime' => $mimeType,
+            'size' => Storage::disk('public')->size($normalizedPath),
+            'width' => $dimensions['width'] ?? null,
+            'height' => $dimensions['height'] ?? null,
+            'is_supported_image' => self::isSupportedImage($mimeType),
+            'is_optimized' => self::isOptimizedImage($mimeType, $dimensions),
+        ];
+    }
+
+    public static function optimizeStoredImage(string $path): string
+    {
+        if (!self::canOptimizeWithGd()) {
+            throw new \RuntimeException('A extensao PHP GD com suporte a WebP e obrigatoria para otimizar imagens existentes.');
+        }
+
+        $normalizedPath = self::normalizePath($path);
+
+        if (!$normalizedPath || !Storage::disk('public')->exists($normalizedPath)) {
+            throw new \RuntimeException('Arquivo nao encontrado no storage.');
+        }
+
+        $contents = Storage::disk('public')->get($normalizedPath);
+        $mimeType = self::detectMime($contents);
+
+        if (!self::isSupportedImage($mimeType)) {
+            throw new \RuntimeException('Arquivo nao e uma imagem suportada.');
+        }
+
+        $directory = trim(dirname($normalizedPath), './\\');
+        $optimizedPath = self::storeOptimizedWebp($contents, $directory !== '' ? $directory : 'evidencias');
+
+        if (!$optimizedPath) {
+            throw new \RuntimeException('Nao foi possivel otimizar a imagem.');
+        }
+
+        return $optimizedPath;
+    }
+
     private static function isSupportedImage(?string $mimeType): bool
     {
         return isset(self::IMAGE_MIME_EXTENSIONS[$mimeType]);
@@ -103,6 +160,33 @@ class EvidenceFileService
         finfo_close($fileInfo);
 
         return $mimeType;
+    }
+
+    private static function imageDimensions(string $contents): ?array
+    {
+        if (!function_exists('getimagesizefromstring')) {
+            return null;
+        }
+
+        $size = @getimagesizefromstring($contents);
+
+        if (!$size || empty($size[0]) || empty($size[1])) {
+            return null;
+        }
+
+        return [
+            'width' => (int) $size[0],
+            'height' => (int) $size[1],
+        ];
+    }
+
+    private static function isOptimizedImage(?string $mimeType, ?array $dimensions): bool
+    {
+        if ($mimeType !== 'image/webp' || !$dimensions) {
+            return false;
+        }
+
+        return max((int) $dimensions['width'], (int) $dimensions['height']) <= self::MAX_DIMENSION;
     }
 
     private static function canOptimizeWithGd(): bool
