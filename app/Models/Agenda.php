@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Agenda extends Model
 {
@@ -43,6 +44,13 @@ class Agenda extends Model
         'territorio',
     ];
 
+    protected static function booted(): void
+    {
+        static::deleting(function (self $agenda): void {
+            $agenda->vistorias()->get()->each->delete();
+        });
+    }
+
     /**
      * Relação com o Fiscal (User).
      */
@@ -57,6 +65,11 @@ class Agenda extends Model
     public function atendimentoOriginal()
     {
         return $this->belongsTo(BaseSalesforceIntegrada::class, 'original_atendimento_id');
+    }
+
+    public function vistorias(): HasMany
+    {
+        return $this->hasMany(Vistoria::class, 'agenda_id');
     }
     /**
      * The attributes that should be cast.

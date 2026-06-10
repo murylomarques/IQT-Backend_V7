@@ -226,7 +226,7 @@ class AgendaController extends Controller
                 if ($vistoria) {
                     // Primeiro, remove todos os itens do checklist associados a essa vistoria.
                     // Isso evita que fiquem registros "órfãos" no banco de dados.
-                    VistoriaChecklistItem::where('vistoria_id', $vistoria->id)->delete();
+                    $vistoria->checklistItens()->get()->each->delete();
 
                     // Agora, remove a vistoria principal.
                     $vistoria->delete();

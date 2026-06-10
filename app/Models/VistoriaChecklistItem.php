@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\EvidenceFileService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,14 @@ class VistoriaChecklistItem extends Model
         'vistoria_id', 'item_key', 'status', 'observacao', 'foto_path',
         'status_correcao', 'observacao_correcao', 'foto_correcao_path' // Adicionados
     ];
+
+    protected static function booted(): void
+    {
+        static::deleting(function (self $item): void {
+            EvidenceFileService::delete($item->foto_path);
+            EvidenceFileService::delete($item->foto_correcao_path);
+        });
+    }
     /**
      * Define a relação inversa: um item pertence a uma vistoria.
      */

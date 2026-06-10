@@ -6,6 +6,7 @@ use App\Models\Agenda;
 use App\Models\Vistoria;
 use App\Models\VistoriaChecklistItem;
 use App\Services\ActivityLogService;
+use App\Services\EvidenceFileService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -61,7 +62,7 @@ class VistoriaController extends Controller
             'checklist'        => 'required|array',
             'checklist.*.status'    => 'required|string|in:Conforme,Não Conforme,Não se Aplica,NÃ£o Conforme,NÃ£o se Aplica',
             'checklist.*.observacao' => 'nullable|string|max:1000',
-            'checklist.*.foto'      => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
+            'checklist.*.foto'      => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -71,7 +72,11 @@ class VistoriaController extends Controller
         $validatedData = $validator->validated();
         $agenda = Agenda::findOrFail($validatedData['agenda_id']);
 
+        $storedPaths = [];
+
         DB::beginTransaction();
+
+        try {
 
         $temNaoConforme = false;
         foreach ($validatedData['checklist'] as $itemData) {
@@ -95,7 +100,8 @@ class VistoriaController extends Controller
         foreach ($validatedData['checklist'] as $key => $itemData) {
             $fotoPath = null;
             if ($request->hasFile("checklist.{$key}.foto")) {
-                $fotoPath = $request->file("checklist.{$key}.foto")->store('vistorias', 'public');
+                $fotoPath = EvidenceFileService::storeUploaded($request->file("checklist.{$key}.foto"), 'vistorias');
+                $storedPaths[] = $fotoPath;
             }
 
             $vistoria->checklistItens()->create([
@@ -112,7 +118,18 @@ class VistoriaController extends Controller
 
         DB::commit();
 
-        return response()->json(['message' => 'Vistoria registrada com sucesso!'], 201);
+            return response()->json(['message' => 'Vistoria registrada com sucesso!'], 201);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            foreach ($storedPaths as $path) {
+                EvidenceFileService::delete($path);
+            }
+
+            report($e);
+
+            return response()->json(['message' => 'Erro ao registrar vistoria.'], 500);
+        }
     }
 
     /**
@@ -236,17 +253,27 @@ class VistoriaController extends Controller
     public function resolverItem(Request $request, VistoriaChecklistItem $item)
     {
         $request->validate([
-            'foto_correcao' => 'required|image|max:2048',
+            'foto_correcao' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
             'observacao_correcao' => 'nullable|string|max:1000',
         ]);
 
-        $path = $request->file('foto_correcao')->store('correcoes', 'public');
+        $oldPath = $item->foto_correcao_path;
+        $path = EvidenceFileService::storeUploaded($request->file('foto_correcao'), 'correcoes');
 
-        $item->update([
-            'foto_correcao_path' => $path,
-            'observacao_correcao' => $request->observacao_correcao,
-            'status_correcao' => $this->getEmAnaliseStatusValue(),
-        ]);
+        try {
+            $item->update([
+                'foto_correcao_path' => $path,
+                'observacao_correcao' => $request->observacao_correcao,
+                'status_correcao' => $this->getEmAnaliseStatusValue(),
+            ]);
+        } catch (\Throwable $e) {
+            EvidenceFileService::delete($path);
+            throw $e;
+        }
+
+        if ($oldPath && $oldPath !== $path) {
+            EvidenceFileService::delete($oldPath);
+        }
 
         ActivityLogService::log(
             'checklist_item.response_submitted',

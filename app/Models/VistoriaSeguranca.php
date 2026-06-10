@@ -43,6 +43,13 @@ class VistoriaSeguranca extends Model
         'observacoes',
     ];
 
+    protected static function booted(): void
+    {
+        static::deleting(function (self $vistoria): void {
+            $vistoria->arquivos()->get()->each->delete();
+        });
+    }
+
     public function arquivos(): HasMany
     {
         return $this->hasMany(VistoriaSegurancaArquivo::class, 'vistoria_seguranca_id');

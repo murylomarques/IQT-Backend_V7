@@ -13,6 +13,13 @@ class Vistoria extends Model
     use HasFactory;
     protected $fillable = ['agenda_id', 'fiscal_id', 'tipo', 'metros_drop', 'retorno_tecnico', 'observacoes_gerais', 'status_laudo'];
 
+    protected static function booted(): void
+    {
+        static::deleting(function (self $vistoria): void {
+            $vistoria->checklistItens()->get()->each->delete();
+        });
+    }
+
     /**
      * Define a relação: uma Vistoria tem muitos itens de checklist.
      * O nome do método DEVE ser exatamente 'checklistItens' para corresponder ao controller.

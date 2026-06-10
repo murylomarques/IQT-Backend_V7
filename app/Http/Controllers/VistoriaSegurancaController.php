@@ -3,10 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\VistoriaSeguranca;
+use App\Services\EvidenceFileService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class VistoriaSegurancaController extends Controller
@@ -148,22 +148,20 @@ class VistoriaSegurancaController extends Controller
                 $fileData = $base64;
             }
 
-            $fileData = base64_decode($fileData);
+            $fileData = base64_decode($fileData, true);
 
-            $extension = 'jpg';
-            if (str_contains($meta, 'png'))  $extension = 'png';
-            if (str_contains($meta, 'pdf'))  $extension = 'pdf';
-            if (str_contains($meta, 'jpeg')) $extension = 'jpeg';
+            if ($fileData === false) {
+                return response()->json(['message' => 'Arquivo base64 inválido.'], 422);
+            }
 
-            $filename = uniqid('vistoria_') . '.' . $extension;
-            $path = "vistorias_seguranca/$filename";
-
-            Storage::disk('public')->put($path, $fileData);
+            $path = EvidenceFileService::storeContents($fileData, 'vistorias_seguranca');
 
             $vistoria->arquivos()->create(['path' => $path]);
 
             return response()->json(['message' => 'Arquivo enviado com sucesso.', 'path' => $path], 200);
 
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         } catch (\Exception $e) {
             Log::error("Erro upload base64 → {$e->getMessage()}");
             return response()->json(['message' => 'Erro interno no upload.'], 500);
