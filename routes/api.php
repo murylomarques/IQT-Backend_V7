@@ -155,7 +155,7 @@ Route::middleware('api')->group(function () {
         Route::put('/fca/window', [FcaController::class, 'updateWindow'])->middleware('fca.admin');
 
         // User management (admin only)
-        Route::get('/fca/users', [FcaController::class, 'indexUsers'])->middleware('fca.admin');
+        Route::get('/fca/users', [FcaController::class, 'indexUsers'])->middleware('fca.admin_or_consulta');
         Route::post('/fca/users', [FcaController::class, 'createUser'])->middleware('fca.admin');
         // Rotas fixas devem vir ANTES das rotas com {id}
         Route::post('/fca/users/import-csv', [FcaController::class, 'importCsv'])->middleware('fca.admin');
@@ -166,31 +166,31 @@ Route::middleware('api')->group(function () {
 
         // Hierarchy
         Route::get('/fca/hierarchy', [FcaHierarchyController::class, 'getSubordinates']);
-        Route::get('/fca/hierarchy/all', [FcaHierarchyController::class, 'getAllHierarchy'])->middleware('fca.admin');
-        Route::get('/fca/hierarchy/full-tree', [FcaHierarchyController::class, 'fullTree'])->middleware('fca.admin');
+        Route::get('/fca/hierarchy/all', [FcaHierarchyController::class, 'getAllHierarchy'])->middleware('fca.admin_or_consulta');
+        Route::get('/fca/hierarchy/full-tree', [FcaHierarchyController::class, 'fullTree'])->middleware('fca.admin_or_consulta');
         Route::post('/fca/hierarchy/link', [FcaHierarchyController::class, 'link']);
         Route::post('/fca/hierarchy/bulk-link', [FcaHierarchyController::class, 'bulkLink']);
         Route::delete('/fca/hierarchy/unlink/{childId}', [FcaHierarchyController::class, 'unlink']);
 
         // Link requests (admin)
-        Route::get('/fca/link-requests', [FcaHierarchyController::class, 'getLinkRequests'])->middleware('fca.admin');
+        Route::get('/fca/link-requests', [FcaHierarchyController::class, 'getLinkRequests'])->middleware('fca.admin_or_consulta');
         Route::put('/fca/link-requests/{id}/approve', [FcaHierarchyController::class, 'approveLinkRequest'])->middleware('fca.admin');
         Route::put('/fca/link-requests/{id}/reject', [FcaHierarchyController::class, 'rejectLinkRequest'])->middleware('fca.admin');
 
         // ── FCA Form (checklist / PO) ──────────────────────────────────────
         Route::get('/fcaf/period/active',    [FcaFormController::class, 'activePeriod']);
-        Route::get('/fcaf/periods',          [FcaFormController::class, 'periodHistory'])->middleware('fca.admin');
+        Route::get('/fcaf/periods',          [FcaFormController::class, 'periodHistory'])->middleware('fca.admin_or_consulta');
         Route::post('/fcaf/period/upload',   [FcaFormController::class, 'uploadBase'])->middleware('fca.admin');
         Route::get('/fcaf/tecnicos',         [FcaFormController::class, 'myTecnicos']);
         Route::get('/fcaf/analytics',        [FcaFormController::class, 'analytics']);
-        Route::get('/fcaf/analytics/all',    [FcaFormController::class, 'analyticsAll'])->middleware('fca.admin');
+        Route::get('/fcaf/analytics/all',    [FcaFormController::class, 'analyticsAll'])->middleware('fca.admin_or_consulta');
         Route::get('/fcaf/tecnico/{id}',     [FcaFormController::class, 'tecnicoDetail']);
 
         Route::get('/fcaf/tecnico/{id}/checklist', [FcaChecklistController::class, 'getForTecnico']);
-        Route::post('/fcaf/checklist',             [FcaChecklistController::class, 'store']);
+        Route::post('/fcaf/checklist',             [FcaChecklistController::class, 'store'])->middleware('fca.supervisor');
 
         Route::get('/fcaf/tecnico/{id}/pos',  [FcaPoController::class, 'getForTecnico']);
-        Route::post('/fcaf/po',               [FcaPoController::class, 'store']);
+        Route::post('/fcaf/po',               [FcaPoController::class, 'store'])->middleware('fca.supervisor');
     });
 
 });

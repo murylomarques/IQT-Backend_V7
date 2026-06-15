@@ -247,16 +247,16 @@ class FcaFormController extends Controller
     // ── Helpers ───────────────────────────────────────────────────────────────
     private function formatTecnico(FcaPeriodTecnico $t, int $supId, FcaPeriod $period): array
     {
-        $checklist    = FcaChecklist::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->first();
+        $checklistCount = FcaChecklist::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->count();
         $pos          = FcaPo::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->get();
         $distinctDays = $pos->pluck('po_date')->map(fn($d) => $d->toDateString())->unique()->count();
         $requiredPos  = $t->requiredPos();
+        $poProgress   = $t->isCertificado() ? $pos->count() : $distinctDays;
 
-        $poMet = $t->isCertificado()
-            ? $pos->count() >= 1
-            : $distinctDays >= 5;
+        $checklistMet = $checklistCount >= $requiredPos;
+        $poMet        = $poProgress >= $requiredPos && $pos->count() >= $checklistCount;
 
-        $isComplete = $checklist && $poMet;
+        $isComplete = $checklistMet && $poMet;
         $isExpired  = $period->isExpired();
 
         if ($isComplete) {
@@ -274,9 +274,13 @@ class FcaFormController extends Controller
             'prod_bruta'    => $t->prod_bruta,
             'revisita'      => $t->revisita,
             'tec1'          => $t->tec1,
-            'has_checklist' => (bool) $checklist,
+            'isCertificado' => $t->isCertificado(),
+            'has_checklist' => $checklistCount > 0,
+            'checklist_count' => $checklistCount,
+            'required_checklists' => $requiredPos,
             'po_count'      => $pos->count(),
             'po_days'       => $distinctDays,
+            'po_progress'   => $poProgress,
             'required_pos'  => $requiredPos,
             'status'        => $status,
         ];

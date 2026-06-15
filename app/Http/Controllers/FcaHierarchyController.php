@@ -40,6 +40,10 @@ class FcaHierarchyController extends Controller
     {
         $actor = $request->attributes->get('fca_user');
 
+        if ($actor->role === 'consulta') {
+            return response()->json(['error' => 'Perfil de consulta permite apenas visualizacao.'], 403);
+        }
+
         $request->validate([
             'parent_id' => 'required|integer|exists:fca_users,id',
             'child_id'  => 'required|integer|exists:fca_users,id|different:parent_id',
@@ -114,6 +118,10 @@ class FcaHierarchyController extends Controller
     {
         $actor = $request->attributes->get('fca_user');
 
+        if ($actor->role === 'consulta') {
+            return response()->json(['error' => 'Perfil de consulta permite apenas visualizacao.'], 403);
+        }
+
         $request->validate([
             'parent_id'   => 'required|integer|exists:fca_users,id',
             'child_ids'   => 'required|array|min:1',
@@ -187,6 +195,11 @@ class FcaHierarchyController extends Controller
     public function unlink(Request $request, $childId)
     {
         $actor = $request->attributes->get('fca_user');
+
+        if ($actor->role === 'consulta') {
+            return response()->json(['error' => 'Perfil de consulta permite apenas visualizacao.'], 403);
+        }
+
         $child = FcaUser::findOrFail($childId);
 
         if ($actor->role !== 'admin' && (int) $actor->id !== (int) $child->manager_id) {

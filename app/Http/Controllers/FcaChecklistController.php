@@ -15,17 +15,26 @@ class FcaChecklistController extends Controller
         $period = FcaPeriod::where('is_active', true)->latest()->first();
         if (!$period) return response()->json(null);
 
-        $checklist = FcaChecklist::where('fca_period_id', $period->id)
+        $checklists = FcaChecklist::where('fca_period_id', $period->id)
             ->where('tecnico_id', $tecnicoId)
             ->where('supervisor_id', $req->attributes->get('fca_user')->id)
-            ->first();
+            ->orderByDesc('created_at')
+            ->get();
 
-        if (!$checklist) return response()->json(null);
+        if ($checklists->isEmpty()) return response()->json(null);
+
+        $latest = $checklists->first();
 
         return response()->json([
-            'id'         => $checklist->id,
-            'answers'    => $checklist->answers,
-            'created_at' => $checklist->created_at,
+            'id' => $latest->id,
+            'answers' => $latest->answers,
+            'created_at' => $latest->created_at,
+            'checklist_count' => $checklists->count(),
+            'checklists' => $checklists->map(fn($item) => [
+                'id' => $item->id,
+                'answers' => $item->answers,
+                'created_at' => $item->created_at,
+            ])->values(),
         ]);
     }
 
@@ -34,30 +43,32 @@ class FcaChecklistController extends Controller
     {
         $req->validate([
             'tecnico_id' => 'required|exists:fca_period_tecnicos,id',
-            'answers'    => 'required|array|min:1',
+            'answers' => 'required|array|min:1',
         ]);
 
         $period = FcaPeriod::where('is_active', true)->latest()->first();
-        if (!$period) return response()->json(['error' => 'Nenhum período ativo.'], 422);
-        if ($period->isExpired()) return response()->json(['error' => 'Período expirado.'], 422);
+        if (!$period) return response()->json(['error' => 'Nenhum periodo ativo.'], 422);
+        if ($period->isExpired()) return response()->json(['error' => 'Periodo expirado.'], 422);
 
         $tec = FcaPeriodTecnico::findOrFail($req->tecnico_id);
         if ($tec->fca_period_id !== $period->id) {
-            return response()->json(['error' => 'Técnico não pertence ao período ativo.'], 422);
+            return response()->json(['error' => 'Tecnico nao pertence ao periodo ativo.'], 422);
         }
 
-        $existing = FcaChecklist::where('fca_period_id', $period->id)
+        $existingCount = FcaChecklist::where('fca_period_id', $period->id)
             ->where('tecnico_id', $req->tecnico_id)
             ->where('supervisor_id', $req->attributes->get('fca_user')->id)
-            ->first();
+            ->count();
 
-        if ($existing) return response()->json(['error' => 'Checklist já preenchido para este técnico neste período.'], 422);
+        if ($existingCount >= $tec->requiredPos()) {
+            return response()->json(['error' => 'Quantidade maxima de checklists ja realizada para este tecnico neste periodo.'], 422);
+        }
 
         $checklist = FcaChecklist::create([
             'fca_period_id' => $period->id,
             'supervisor_id' => $req->attributes->get('fca_user')->id,
-            'tecnico_id'    => $req->tecnico_id,
-            'answers'       => $req->answers,
+            'tecnico_id' => $req->tecnico_id,
+            'answers' => $req->answers,
         ]);
 
         return response()->json(['id' => $checklist->id, 'message' => 'Checklist salvo com sucesso.'], 201);

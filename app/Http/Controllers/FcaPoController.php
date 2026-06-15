@@ -50,13 +50,22 @@ class FcaPoController extends Controller
 
         $supervisorId = $req->attributes->get('fca_user')->id;
 
-        $hasChecklist = \App\Models\FcaChecklist::where('fca_period_id', $period->id)
+        $checklistCount = \App\Models\FcaChecklist::where('fca_period_id', $period->id)
             ->where('tecnico_id', $req->tecnico_id)
             ->where('supervisor_id', $supervisorId)
-            ->exists();
+            ->count();
 
-        if (!$hasChecklist) {
+        if ($checklistCount === 0) {
             return response()->json(['error' => 'Preencha o Checklist deste técnico antes de registrar um PO.'], 422);
+        }
+
+        $poCount = FcaPo::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $req->tecnico_id)
+            ->where('supervisor_id', $supervisorId)
+            ->count();
+
+        if ($poCount >= $checklistCount) {
+            return response()->json(['error' => 'Para registrar outro PO, realize mais um Checklist deste tecnico primeiro.'], 422);
         }
 
         // Non-certified: block if already has a PO on the same date
