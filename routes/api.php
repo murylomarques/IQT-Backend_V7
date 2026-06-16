@@ -27,6 +27,7 @@ use App\Http\Controllers\AdminOverviewController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\MonitorController;
+use App\Http\Controllers\ManutencaoController;
 use App\Http\Middleware\IsAdmin;
 use App\Services\ActivityLogService;
 
@@ -85,6 +86,21 @@ Route::middleware('api')->group(function () {
         Route::get('/fiscais', [FiscalController::class, 'index']);
         Route::post('/location', [LocationController::class, 'store']);
         Route::get('/home-data', [HomeController::class, 'index']);
+
+        // Rotas de Vistoria de Manutencao
+        Route::prefix('manutencao')->group(function () {
+            Route::get('/atendimentos', [ManutencaoController::class, 'atendimentos']);
+            Route::get('/atendimentos/{id}', [ManutencaoController::class, 'showAtendimento']);
+            Route::get('/fiscais/{id}/agenda', [ManutencaoController::class, 'agendaFiscal']);
+            Route::get('/agenda/minhas-vistorias-hoje', [ManutencaoController::class, 'minhasVistoriasHoje']);
+            Route::get('/agenda/{agenda}', [ManutencaoController::class, 'showAgenda']);
+            Route::post('/agenda', [ManutencaoController::class, 'storeAgenda']);
+            Route::get('/vistorias/backlog', [ManutencaoController::class, 'backlog']);
+            Route::get('/vistorias/{vistoria}', [ManutencaoController::class, 'showVistoria']);
+            Route::post('/vistorias', [ManutencaoController::class, 'storeVistoria']);
+            Route::post('/checklist-itens/{item}/resolver', [ManutencaoController::class, 'resolverItem']);
+            Route::post('/checklist-itens/{item}/avaliar', [ManutencaoController::class, 'avaliarItem']);
+        });
 
         // Rotas de Agenda
         Route::get('/agenda/minhas-vistorias-hoje', [AgendaController::class, 'minhasVistoriasHoje']);
