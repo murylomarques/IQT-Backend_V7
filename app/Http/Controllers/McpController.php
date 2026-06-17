@@ -10,7 +10,7 @@ class McpController extends Controller
 {
     private const HISTORICO_MAX_MESES = 3;
     private const HISTORICO_POR_PAGINA_PADRAO = 10000;
-    private const HISTORICO_POR_PAGINA_MAX = 50000;
+    private const HISTORICO_POR_PAGINA_MAX = 100000;
 
     private function db()
     {
