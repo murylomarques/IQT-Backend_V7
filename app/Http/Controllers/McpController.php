@@ -117,6 +117,10 @@ class McpController extends Controller
     // ?regional= &tipo_os= &data_inicio= &data_fim= &mes= &ano= &pagina= &por_pagina= &sem_total=
     public function historicoDiario(Request $request)
     {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
+
         $request->validate([
             'regional' => 'nullable|string|max:255',
             'tipo_os' => 'nullable|string|max:255',
@@ -141,11 +145,6 @@ class McpController extends Controller
 
         $query->whereBetween('data_referencia', [$periodo['inicio'], $periodo['fim']]);
 
-        $query->orderBy('data_hora_abertura', 'desc')
-            ->orderBy('data_referencia', 'desc')
-            ->orderBy('regional')
-            ->orderBy('tipo_os');
-
         $porPagina = min(
             (int) $request->input('por_pagina', self::HISTORICO_POR_PAGINA_PADRAO),
             self::HISTORICO_POR_PAGINA_MAX
@@ -154,30 +153,77 @@ class McpController extends Controller
 
         $semTotal = $request->boolean('sem_total');
         $total = $semTotal ? null : (clone $query)->count();
-        $dados = $query->offset(($pagina - 1) * $porPagina)
+
+        $dadosQuery = (clone $query)
+            ->offset(($pagina - 1) * $porPagina)
             ->limit($semTotal ? $porPagina + 1 : $porPagina)
-            ->get();
-        $temMais = $semTotal
-            ? $dados->count() > $porPagina
-            : ($pagina * $porPagina) < $total;
+            ->orderBy('data_hora_abertura', 'desc')
+            ->orderBy('data_referencia', 'desc')
+            ->orderBy('regional')
+            ->orderBy('tipo_os');
 
-        if ($semTotal && $temMais) {
-            $dados = $dados->take($porPagina)->values();
-        }
+        $periodoResponse = [
+            'data_inicio' => $periodo['inicio'],
+            'data_fim' => $periodo['fim'],
+            'maximo_meses' => self::HISTORICO_MAX_MESES,
+            'limite_aplicado' => $periodo['limite_aplicado'],
+        ];
+        $paginas = $total === null ? null : (int) ceil($total / $porPagina);
 
-        return response()->json([
-            'total'      => $total,
-            'pagina'     => $pagina,
-            'por_pagina' => $porPagina,
-            'paginas'    => $total === null ? null : (int) ceil($total / $porPagina),
-            'tem_mais'   => $temMais,
-            'periodo'    => [
-                'data_inicio' => $periodo['inicio'],
-                'data_fim' => $periodo['fim'],
-                'maximo_meses' => self::HISTORICO_MAX_MESES,
-                'limite_aplicado' => $periodo['limite_aplicado'],
-            ],
-            'dados'      => $dados,
+        return response()->stream(function () use (
+            $dadosQuery,
+            $pagina,
+            $porPagina,
+            $semTotal,
+            $total,
+            $paginas,
+            $periodoResponse
+        ) {
+            $jsonFlags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+            $temMais = false;
+            $enviados = 0;
+            $primeiro = true;
+
+            echo '{';
+            echo '"total":' . json_encode($total, $jsonFlags);
+            echo ',"pagina":' . $pagina;
+            echo ',"por_pagina":' . $porPagina;
+            echo ',"paginas":' . json_encode($paginas, $jsonFlags);
+            echo ',"periodo":' . json_encode($periodoResponse, $jsonFlags);
+            echo ',"dados":[';
+
+            foreach ($dadosQuery->cursor() as $row) {
+                if ($semTotal && $enviados >= $porPagina) {
+                    $temMais = true;
+                    break;
+                }
+
+                if (!$primeiro) {
+                    echo ',';
+                }
+
+                echo json_encode($row, $jsonFlags);
+                $primeiro = false;
+                $enviados++;
+
+                if (($enviados % 500) === 0) {
+                    if (ob_get_level() > 0) {
+                        @ob_flush();
+                    }
+                    @flush();
+                }
+            }
+
+            if (!$semTotal) {
+                $temMais = ($pagina * $porPagina) < $total;
+            }
+
+            echo '],"tem_mais":' . ($temMais ? 'true' : 'false');
+            echo '}';
+        }, 200, [
+            'Content-Type' => 'application/json; charset=UTF-8',
+            'Cache-Control' => 'no-store',
+            'X-Accel-Buffering' => 'no',
         ]);
     }
 
