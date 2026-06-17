@@ -130,7 +130,7 @@ class McpController extends Controller
         ]);
 
         $periodo = $this->historicoPeriodo($request);
-        $query = $this->db()->table('vw_mcp_historico_diario');
+        $query = $this->db()->table('vw_mcp_historico_entrantes_hora');
 
         if ($request->filled('regional')) {
             $query->where('regional', $request->regional);
@@ -141,7 +141,8 @@ class McpController extends Controller
 
         $query->whereBetween('data_referencia', [$periodo['inicio'], $periodo['fim']]);
 
-        $query->orderBy('data_referencia', 'desc')
+        $query->orderBy('data_hora_abertura', 'desc')
+            ->orderBy('data_referencia', 'desc')
             ->orderBy('regional')
             ->orderBy('tipo_os');
 
