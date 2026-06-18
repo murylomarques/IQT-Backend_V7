@@ -5,16 +5,28 @@ namespace App\Http\Controllers;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class McpController extends Controller
 {
     private const HISTORICO_MAX_MESES = 3;
     private const HISTORICO_POR_PAGINA_PADRAO = 10000;
     private const HISTORICO_POR_PAGINA_MAX = 100000;
+    private const RADAR_POR_PAGINA_PADRAO = 10000;
+    private const RADAR_POR_PAGINA_MAX = 100000;
 
     private function db()
     {
         return DB::connection('melhoria_continua');
+    }
+
+    private function viewColumns(string $view): array
+    {
+        try {
+            return Schema::connection('melhoria_continua')->getColumnListing($view);
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     private function historicoPeriodo(Request $request): array
@@ -111,6 +123,112 @@ class McpController extends Controller
         }
 
         return response()->json($query->get());
+    }
+
+    // GET /api/mcp/radar-entrantes-planejamento
+    // ?regional= &territorio= &cidade= &tipo_os= &status_os= &data_inicio= &data_fim= &pagina= &por_pagina= &sem_total=
+    public function radarEntrantesPlanejamento(Request $request)
+    {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
+
+        $request->validate([
+            'regional' => 'nullable|string|max:255',
+            'territorio' => 'nullable|string|max:255',
+            'cidade' => 'nullable|string|max:255',
+            'tipo_os' => 'nullable|string|max:255',
+            'status_os' => 'nullable|string|max:255',
+            'data_inicio' => 'nullable|date',
+            'data_fim' => 'nullable|date',
+            'pagina' => 'nullable|integer|min:1',
+            'por_pagina' => 'nullable|integer|min:1|max:' . self::RADAR_POR_PAGINA_MAX,
+            'sem_total' => 'nullable|boolean',
+        ]);
+
+        $view = 'vw_mcp_radar_entrantes_planejamento';
+        $columns = $this->viewColumns($view);
+        $query = $this->db()->table($view);
+
+        foreach (['regional', 'territorio', 'cidade', 'tipo_os', 'status_os'] as $filter) {
+            if ($request->filled($filter) && in_array($filter, $columns, true)) {
+                $query->where($filter, $request->query($filter));
+            }
+        }
+
+        if ($request->filled('data_inicio') && in_array('data_referencia', $columns, true)) {
+            $query->where('data_referencia', '>=', $request->query('data_inicio'));
+        }
+        if ($request->filled('data_fim') && in_array('data_referencia', $columns, true)) {
+            $query->where('data_referencia', '<=', $request->query('data_fim'));
+        }
+
+        $porPagina = min(
+            (int) $request->input('por_pagina', self::RADAR_POR_PAGINA_PADRAO),
+            self::RADAR_POR_PAGINA_MAX
+        );
+        $pagina = max((int) $request->input('pagina', 1), 1);
+        $semTotal = $request->boolean('sem_total');
+        $total = $semTotal ? null : (clone $query)->count();
+
+        $dadosQuery = (clone $query)
+            ->offset(($pagina - 1) * $porPagina)
+            ->limit($semTotal ? $porPagina + 1 : $porPagina);
+
+        foreach (['data_referencia', 'regional', 'territorio', 'cidade', 'tipo_os', 'status_os'] as $orderColumn) {
+            if (in_array($orderColumn, $columns, true)) {
+                $dadosQuery->orderBy($orderColumn, $orderColumn === 'data_referencia' ? 'desc' : 'asc');
+            }
+        }
+
+        $paginas = $total === null ? null : (int) ceil($total / $porPagina);
+
+        return response()->stream(function () use ($dadosQuery, $pagina, $porPagina, $semTotal, $total, $paginas) {
+            $jsonFlags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+            $temMais = false;
+            $enviados = 0;
+            $primeiro = true;
+
+            echo '{';
+            echo '"total":' . json_encode($total, $jsonFlags);
+            echo ',"pagina":' . $pagina;
+            echo ',"por_pagina":' . $porPagina;
+            echo ',"paginas":' . json_encode($paginas, $jsonFlags);
+            echo ',"dados":[';
+
+            foreach ($dadosQuery->cursor() as $row) {
+                if ($semTotal && $enviados >= $porPagina) {
+                    $temMais = true;
+                    break;
+                }
+
+                if (!$primeiro) {
+                    echo ',';
+                }
+
+                echo json_encode($row, $jsonFlags);
+                $primeiro = false;
+                $enviados++;
+
+                if (($enviados % 500) === 0) {
+                    if (ob_get_level() > 0) {
+                        @ob_flush();
+                    }
+                    @flush();
+                }
+            }
+
+            if (!$semTotal) {
+                $temMais = ($pagina * $porPagina) < $total;
+            }
+
+            echo '],"tem_mais":' . ($temMais ? 'true' : 'false');
+            echo '}';
+        }, 200, [
+            'Content-Type' => 'application/json; charset=UTF-8',
+            'Cache-Control' => 'no-store',
+            'X-Accel-Buffering' => 'no',
+        ]);
     }
 
     // GET /api/mcp/historico-diario

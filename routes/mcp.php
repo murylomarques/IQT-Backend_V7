@@ -10,6 +10,7 @@ Route::middleware('api')->group(function () {
         Route::get('/entrantes-por-hora',[McpController::class, 'entrantesPorHora']);
         Route::get('/anomalias-olt',     [McpController::class, 'anomaliasOlt']);
         Route::get('/backlog-aging',     [McpController::class, 'backlogAging']);
+        Route::get('/radar-entrantes-planejamento', [McpController::class, 'radarEntrantesPlanejamento']);
         Route::get('/historico-diario',  [McpController::class, 'historicoDiario']);
         Route::get('/resumo-operacional',[McpController::class, 'resumoOperacional']);
     });
