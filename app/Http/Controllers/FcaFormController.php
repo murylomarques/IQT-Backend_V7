@@ -18,15 +18,7 @@ class FcaFormController extends Controller
         if (!$period) return response()->json(['period' => null]);
 
         return response()->json([
-            'period' => [
-                'id'          => $period->id,
-                'mes'         => $period->mes,
-                'created_at'  => $period->created_at,
-                'expires_at'  => $period->expires_at,
-                'is_expired'  => $period->isExpired(),
-                'days_left'   => $period->daysLeft(),
-                'total_tecnicos' => $period->tecnicos()->count(),
-            ],
+            'period' => $this->periodPayload($period),
         ]);
     }
 
@@ -107,7 +99,7 @@ class FcaFormController extends Controller
 
         return response()->json([
             'message'  => "Base importada: $inserted técnicos no período {$period->mes}.",
-            'period'   => ['id' => $period->id, 'mes' => $period->mes, 'expires_at' => $period->expires_at],
+            'period'   => $this->periodPayload($period),
             'inserted' => $inserted,
         ]);
     }
@@ -120,18 +112,17 @@ class FcaFormController extends Controller
         if (!$period) return response()->json([]);
 
         // Technicians linked in GH under this supervisor
-        $ghNames = FcaUser::where('manager_id', $user->id)
+        $linkedUsers = FcaUser::where('manager_id', $user->id)
             ->whereIn('role', ['tecnico', 'consulta'])
-            ->pluck('name')
-            ->map(fn($n) => mb_strtoupper(trim($n)))
-            ->toArray();
+            ->get()
+            ->keyBy(fn($u) => $this->normalizeName($u->name));
 
         $tecnicos = FcaPeriodTecnico::where('fca_period_id', $period->id)
-            ->whereIn(\DB::raw('UPPER(TRIM(nome))'), $ghNames)
+            ->whereIn(\DB::raw('UPPER(TRIM(nome))'), $linkedUsers->keys()->toArray())
             ->get();
 
         return response()->json(
-            $tecnicos->map(fn($t) => $this->formatTecnico($t, $user->id, $period))
+            $tecnicos->map(fn($t) => $this->formatTecnico($t, $user, $period, $linkedUsers->get($this->normalizeName($t->nome))))
         );
     }
 
@@ -140,9 +131,14 @@ class FcaFormController extends Controller
     {
         $user   = $req->attributes->get('fca_user');
         $period = FcaPeriod::where('is_active', true)->latest()->first();
+        if (!$period) return response()->json(['error' => 'Nenhum periodo ativo.'], 422);
         $tec    = FcaPeriodTecnico::findOrFail($id);
+        $tecnicoUser = FcaUser::where('manager_id', $user->id)
+            ->whereIn('role', ['tecnico', 'consulta'])
+            ->get()
+            ->first(fn($u) => $this->normalizeName($u->name) === $this->normalizeName($tec->nome));
 
-        return response()->json($this->formatTecnico($tec, $user->id, $period));
+        return response()->json($this->formatTecnico($tec, $user, $period, $tecnicoUser));
     }
 
     // ── GET /fcaf/analytics ──────────────────────────────────────────────────
@@ -154,32 +150,20 @@ class FcaFormController extends Controller
             return response()->json(['period' => null, 'metrics' => null, 'tecnicos' => []]);
         }
 
-        $ghNames = FcaUser::where('manager_id', $user->id)
+        $linkedUsers = FcaUser::where('manager_id', $user->id)
             ->whereIn('role', ['tecnico', 'consulta'])
-            ->pluck('name')
-            ->map(fn($n) => mb_strtoupper(trim($n)))
-            ->toArray();
+            ->get()
+            ->keyBy(fn($u) => $this->normalizeName($u->name));
 
         $tecnicos = FcaPeriodTecnico::where('fca_period_id', $period->id)
-            ->whereIn(\DB::raw('UPPER(TRIM(nome))'), $ghNames)
+            ->whereIn(\DB::raw('UPPER(TRIM(nome))'), $linkedUsers->keys()->toArray())
             ->get()
-            ->map(fn($t) => $this->formatTecnico($t, $user->id, $period));
+            ->map(fn($t) => $this->formatTecnico($t, $user, $period, $linkedUsers->get($this->normalizeName($t->nome))));
 
-        $metrics = [
-            'total'     => $tecnicos->count(),
-            'realizado' => $tecnicos->where('status', 'realizado')->count(),
-            'pendente'  => $tecnicos->where('status', 'pendente')->count(),
-            'vencido'   => $tecnicos->where('status', 'vencido')->count(),
-        ];
+        $metrics = $this->buildMetrics($tecnicos);
 
         return response()->json([
-            'period'   => [
-                'id'         => $period->id,
-                'mes'        => $period->mes,
-                'expires_at' => $period->expires_at,
-                'is_expired' => $period->isExpired(),
-                'days_left'  => $period->daysLeft(),
-            ],
+            'period'   => $this->periodPayload($period),
             'metrics'  => $metrics,
             'tecnicos' => $tecnicos->values(),
         ]);
@@ -188,43 +172,81 @@ class FcaFormController extends Controller
     // ── GET /fcaf/analytics/all (admin) ──────────────────────────────────────
     public function analyticsAll(Request $req)
     {
-        $period = FcaPeriod::where('is_active', true)->latest()->first();
-        if (!$period) return response()->json(['period' => null, 'supervisors' => []]);
+        $period = $this->resolvePeriod($req);
+        if (!$period) {
+            return response()->json([
+                'period' => null,
+                'metrics' => $this->buildMetrics(collect()),
+                'supervisors' => [],
+                'filters' => $this->filterPayload($req),
+            ]);
+        }
 
-        $supervisors = FcaUser::where('role', 'supervisao')->get();
+        $selectedRegional = trim((string) $req->query('regional', ''));
+        $selectedStatus = trim((string) $req->query('status', ''));
 
-        $result = $supervisors->map(function ($sup) use ($period) {
-            $ghNames = FcaUser::where('manager_id', $sup->id)
+        $periodTecnicos = FcaPeriodTecnico::where('fca_period_id', $period->id)
+            ->get()
+            ->keyBy(fn($t) => $this->normalizeName($t->nome));
+
+        $supervisors = FcaUser::where('role', 'supervisao')
+            ->with('manager:id,name,role,regional,territory')
+            ->orderBy('name')
+            ->get();
+
+        $result = $supervisors->map(function ($sup) use ($period, $periodTecnicos, $selectedRegional, $selectedStatus) {
+            $children = FcaUser::where('manager_id', $sup->id)
                 ->whereIn('role', ['tecnico', 'consulta'])
-                ->pluck('name')
-                ->map(fn($n) => mb_strtoupper(trim($n)))
-                ->toArray();
+                ->orderBy('name')
+                ->get();
 
-            $tecs = FcaPeriodTecnico::where('fca_period_id', $period->id)
-                ->whereIn(\DB::raw('UPPER(TRIM(nome))'), $ghNames)
-                ->get()
-                ->map(fn($t) => $this->formatTecnico($t, $sup->id, $period));
+            $tecs = $children->map(function ($child) use ($periodTecnicos, $sup, $period) {
+                $periodTec = $periodTecnicos->get($this->normalizeName($child->name));
+                if (!$periodTec) return null;
+
+                return $this->formatTecnico($periodTec, $sup, $period, $child);
+            })->filter()->values();
+
+            if ($selectedRegional !== '') {
+                $supervisorMatchesRegional = $this->sameValue($sup->regional, $selectedRegional);
+                $tecs = $tecs->filter(fn($tec) =>
+                    $supervisorMatchesRegional
+                    || $this->sameValue($tec['regional'] ?? null, $selectedRegional)
+                    || $this->sameValue($tec['coordenador']['regional'] ?? null, $selectedRegional)
+                )->values();
+            }
+
+            if ($selectedStatus !== '') {
+                $tecs = $tecs->filter(fn($tec) => ($tec['status'] ?? null) === $selectedStatus)->values();
+            }
+
+            $metrics = $this->buildMetrics($tecs);
 
             return [
                 'id'        => $sup->id,
                 'name'      => $sup->name,
                 'territory' => $sup->territory,
-                'total'     => $tecs->count(),
-                'realizado' => $tecs->where('status', 'realizado')->count(),
-                'pendente'  => $tecs->where('status', 'pendente')->count(),
-                'vencido'   => $tecs->where('status', 'vencido')->count(),
+                'regional'  => $sup->regional,
+                'coordenador' => $this->formatCoordinator($sup),
+                'total'     => $metrics['total'],
+                'realizado' => $metrics['realizado'],
+                'pendente'  => $metrics['pendente'],
+                'nao_iniciado' => $metrics['nao_iniciado'],
+                'em_andamento' => $metrics['em_andamento'],
+                'vencido'   => $metrics['vencido'],
+                'tecnicos'  => $tecs,
             ];
-        });
+        })->filter(function ($sup) use ($selectedRegional, $selectedStatus) {
+            return ($selectedRegional === '' && $selectedStatus === '') || $sup['total'] > 0;
+        })->values();
+
+        $allTecnicos = $result->flatMap(fn($sup) => $sup['tecnicos']);
 
         return response()->json([
-            'period' => [
-                'id'         => $period->id,
-                'mes'        => $period->mes,
-                'expires_at' => $period->expires_at,
-                'is_expired' => $period->isExpired(),
-                'days_left'  => $period->daysLeft(),
-            ],
-            'supervisors' => $result->values(),
+            'period' => $this->periodPayload($period),
+            'metrics' => $this->buildMetrics($allTecnicos),
+            'filters' => $this->filterPayload($req),
+            'supervisors' => $result,
         ]);
     }
 
@@ -232,44 +254,72 @@ class FcaFormController extends Controller
     public function periodHistory()
     {
         return response()->json(
-            FcaPeriod::latest()->take(12)->get()->map(fn($p) => [
-                'id'         => $p->id,
-                'mes'        => $p->mes,
-                'is_active'  => $p->is_active,
-                'is_expired' => $p->isExpired(),
-                'expires_at' => $p->expires_at,
-                'created_at' => $p->created_at,
-                'total'      => $p->tecnicos()->count(),
-            ])
+            FcaPeriod::latest()->take(24)->get()->map(fn($p) => $this->periodPayload($p))
         );
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    private function formatTecnico(FcaPeriodTecnico $t, int $supId, FcaPeriod $period): array
+    private function formatTecnico(FcaPeriodTecnico $t, ?FcaUser $supervisor, FcaPeriod $period, ?FcaUser $tecnicoUser = null): array
     {
-        $checklistCount = FcaChecklist::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->count();
-        $pos          = FcaPo::where('fca_period_id', $period->id)->where('tecnico_id', $t->id)->where('supervisor_id', $supId)->get();
+        $checklists = FcaChecklist::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $t->id)
+            ->with('supervisor:id,name,regional,territory,manager_id')
+            ->orderBy('created_at')
+            ->get();
+
+        $pos = FcaPo::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $t->id)
+            ->with('supervisor:id,name,regional,territory,manager_id')
+            ->orderBy('created_at')
+            ->get();
+
+        $checklistCount = $checklists->count();
+        $poCount = $pos->count();
         $distinctDays = $pos->pluck('po_date')->map(fn($d) => $d->toDateString())->unique()->count();
-        $requiredPos  = $t->requiredPos();
-        $poProgress   = $t->isCertificado() ? $pos->count() : $distinctDays;
+        $requiredPos = $t->requiredPos();
+        $poProgress = $t->isCertificado() ? $poCount : $distinctDays;
+
+        $lastChecklist = $checklists->last();
+        $lastPo = $pos->last();
+        $nextChecklistAt = $lastChecklist
+            ? $lastChecklist->created_at->copy()->addHours(FcaPeriodTecnico::MIN_HOURS_BETWEEN_SAME_TYPE)
+            : null;
+        $nextPoAt = $lastPo
+            ? $lastPo->created_at->copy()->addHours(FcaPeriodTecnico::MIN_HOURS_BETWEEN_SAME_TYPE)
+            : null;
 
         $checklistMet = $checklistCount >= $requiredPos;
-        $poMet        = $poProgress >= $requiredPos && $pos->count() >= $checklistCount;
-
+        $poMet = $poProgress >= $requiredPos && $poCount >= min($checklistCount, $requiredPos);
         $isComplete = $checklistMet && $poMet;
-        $isExpired  = $period->isExpired();
+        $isExpired = $period->isExpired();
+        $started = $checklistCount > 0 || $poCount > 0;
 
         if ($isComplete) {
             $status = 'realizado';
         } elseif ($isExpired) {
             $status = 'vencido';
+        } elseif (!$started) {
+            $status = 'nao_iniciado';
         } else {
-            $status = 'pendente';
+            $status = 'em_andamento';
         }
+
+        $canCreateChecklist = !$isExpired
+            && $checklistCount < $requiredPos
+            && (!$nextChecklistAt || now()->greaterThanOrEqualTo($nextChecklistAt));
+
+        $canCreatePo = !$isExpired
+            && $checklistCount > 0
+            && $poCount < $requiredPos
+            && $poCount < $checklistCount
+            && (!$nextPoAt || now()->greaterThanOrEqualTo($nextPoAt));
 
         return [
             'id'            => $t->id,
             'nome'          => $t->nome,
+            'tecnico_user_id' => $tecnicoUser?->id,
+            'regional'      => $tecnicoUser?->regional ?? $supervisor?->regional,
+            'territory'     => $tecnicoUser?->territory ?? $supervisor?->territory,
             'certificado'   => $t->certificado,
             'prod_bruta'    => $t->prod_bruta,
             'revisita'      => $t->revisita,
@@ -278,11 +328,154 @@ class FcaFormController extends Controller
             'has_checklist' => $checklistCount > 0,
             'checklist_count' => $checklistCount,
             'required_checklists' => $requiredPos,
-            'po_count'      => $pos->count(),
+            'po_count'      => $poCount,
             'po_days'       => $distinctDays,
             'po_progress'   => $poProgress,
             'required_pos'  => $requiredPos,
             'status'        => $status,
+            'status_label'  => $this->statusLabel($status),
+            'started'       => $started,
+            'progress_text' => "{$checklistCount}/{$requiredPos} Checklists, {$poProgress}/{$requiredPos} POs",
+            'period_started_at' => $period->created_at,
+            'base_uploaded_at' => $period->created_at,
+            'period_ends_at' => $period->expires_at,
+            'last_checklist_at' => $lastChecklist?->created_at,
+            'next_checklist_at' => $nextChecklistAt,
+            'can_create_checklist' => $canCreateChecklist,
+            'last_po_at' => $lastPo?->created_at,
+            'next_po_at' => $nextPoAt,
+            'can_create_po' => $canCreatePo,
+            'supervisor' => $this->formatSupervisor($supervisor),
+            'coordenador' => $this->formatCoordinator($supervisor),
+            'checklist_dates' => $checklists->map(fn($item) => [
+                'id' => $item->id,
+                'created_at' => $item->created_at,
+                'performed_at' => $item->created_at,
+                'supervisor_id' => $item->supervisor_id,
+                'supervisor_name' => $item->supervisor?->name,
+            ])->values(),
+            'po_dates' => $pos->map(fn($item) => [
+                'id' => $item->id,
+                'po_date' => $item->po_date->toDateString(),
+                'created_at' => $item->created_at,
+                'performed_at' => $item->po_date->toDateString(),
+                'supervisor_id' => $item->supervisor_id,
+                'supervisor_name' => $item->supervisor?->name,
+            ])->values(),
+        ];
+    }
+
+    private function resolvePeriod(Request $req): ?FcaPeriod
+    {
+        if ($req->filled('period_id')) {
+            return FcaPeriod::find($req->query('period_id'));
+        }
+
+        return FcaPeriod::where('is_active', true)->latest()->first();
+    }
+
+    private function periodPayload(FcaPeriod $period): array
+    {
+        return [
+            'id' => $period->id,
+            'mes' => $period->mes,
+            'is_active' => $period->is_active,
+            'is_expired' => $period->isExpired(),
+            'days_left' => $period->daysLeft(),
+            'created_at' => $period->created_at,
+            'starts_at' => $period->created_at,
+            'base_uploaded_at' => $period->created_at,
+            'expires_at' => $period->expires_at,
+            'ends_at' => $period->expires_at,
+            'total' => $period->tecnicos()->count(),
+            'total_tecnicos' => $period->tecnicos()->count(),
+        ];
+    }
+
+    private function buildMetrics($tecnicos): array
+    {
+        $collection = collect($tecnicos);
+        $naoIniciado = $collection->where('status', 'nao_iniciado')->count();
+        $emAndamento = $collection->where('status', 'em_andamento')->count();
+
+        return [
+            'total' => $collection->count(),
+            'realizado' => $collection->where('status', 'realizado')->count(),
+            'nao_iniciado' => $naoIniciado,
+            'em_andamento' => $emAndamento,
+            'pendente' => $naoIniciado + $emAndamento,
+            'vencido' => $collection->where('status', 'vencido')->count(),
+        ];
+    }
+
+    private function filterPayload(Request $req): array
+    {
+        return [
+            'selected_period_id' => $req->query('period_id'),
+            'selected_regional' => $req->query('regional'),
+            'selected_status' => $req->query('status'),
+            'regionals' => FcaUser::whereNotNull('regional')
+                ->where('regional', '<>', '')
+                ->distinct()
+                ->orderBy('regional')
+                ->pluck('regional')
+                ->values(),
+            'statuses' => [
+                ['value' => 'nao_iniciado', 'label' => 'Nao iniciado'],
+                ['value' => 'em_andamento', 'label' => 'Em andamento'],
+                ['value' => 'realizado', 'label' => 'Realizado'],
+                ['value' => 'vencido', 'label' => 'Vencido'],
+            ],
+        ];
+    }
+
+    private function statusLabel(string $status): string
+    {
+        return match ($status) {
+            'nao_iniciado' => 'Nao iniciado',
+            'em_andamento' => 'Em andamento',
+            'realizado' => 'Realizado',
+            'vencido' => 'Vencido',
+            default => $status,
+        };
+    }
+
+    private function normalizeName(?string $name): string
+    {
+        return mb_strtoupper(trim((string) $name));
+    }
+
+    private function sameValue(?string $left, string $right): bool
+    {
+        return mb_strtoupper(trim((string) $left)) === mb_strtoupper(trim($right));
+    }
+
+    private function formatSupervisor(?FcaUser $supervisor): ?array
+    {
+        if (!$supervisor) return null;
+
+        return [
+            'id' => $supervisor->id,
+            'name' => $supervisor->name,
+            'regional' => $supervisor->regional,
+            'territory' => $supervisor->territory,
+        ];
+    }
+
+    private function formatCoordinator(?FcaUser $supervisor): ?array
+    {
+        if (!$supervisor) return null;
+
+        $coordenador = $supervisor->manager;
+        if (!$coordenador || $coordenador->role !== 'coordenacao') {
+            return null;
+        }
+
+        return [
+            'id' => $coordenador->id,
+            'name' => $coordenador->name,
+            'regional' => $coordenador->regional,
+            'territory' => $coordenador->territory,
         ];
     }
 

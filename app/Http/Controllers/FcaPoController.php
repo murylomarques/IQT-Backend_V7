@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\FcaChecklist;
 use App\Models\FcaPo;
 use App\Models\FcaPeriod;
 use App\Models\FcaPeriodTecnico;
@@ -17,14 +18,18 @@ class FcaPoController extends Controller
 
         $pos = FcaPo::where('fca_period_id', $period->id)
             ->where('tecnico_id', $tecnicoId)
-            ->where('supervisor_id', $req->attributes->get('fca_user')->id)
+            ->with('supervisor:id,name')
             ->orderBy('po_date', 'desc')
+            ->orderByDesc('created_at')
             ->get()
             ->map(fn($p) => [
                 'id'      => $p->id,
+                'supervisor_id' => $p->supervisor_id,
+                'supervisor_name' => $p->supervisor?->name,
                 'answers' => $p->answers,
                 'po_date' => $p->po_date->toDateString(),
                 'created_at' => $p->created_at,
+                'performed_at' => $p->po_date->toDateString(),
             ]);
 
         return response()->json($pos);
@@ -50,9 +55,8 @@ class FcaPoController extends Controller
 
         $supervisorId = $req->attributes->get('fca_user')->id;
 
-        $checklistCount = \App\Models\FcaChecklist::where('fca_period_id', $period->id)
+        $checklistCount = FcaChecklist::where('fca_period_id', $period->id)
             ->where('tecnico_id', $req->tecnico_id)
-            ->where('supervisor_id', $supervisorId)
             ->count();
 
         if ($checklistCount === 0) {
@@ -61,18 +65,37 @@ class FcaPoController extends Controller
 
         $poCount = FcaPo::where('fca_period_id', $period->id)
             ->where('tecnico_id', $req->tecnico_id)
-            ->where('supervisor_id', $supervisorId)
             ->count();
+
+        if ($poCount >= $tec->requiredPos()) {
+            return response()->json(['error' => 'Quantidade maxima de POs ja realizada para este tecnico neste periodo.'], 422);
+        }
 
         if ($poCount >= $checklistCount) {
             return response()->json(['error' => 'Para registrar outro PO, realize mais um Checklist deste tecnico primeiro.'], 422);
+        }
+
+        $lastPo = FcaPo::where('fca_period_id', $period->id)
+            ->where('tecnico_id', $req->tecnico_id)
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($lastPo) {
+            $nextAvailableAt = $lastPo->created_at->copy()->addHours(FcaPeriodTecnico::MIN_HOURS_BETWEEN_SAME_TYPE);
+
+            if (now()->lt($nextAvailableAt)) {
+                return response()->json([
+                    'error' => 'Aguarde 72 horas desde o ultimo PO deste tecnico para registrar o proximo.',
+                    'last_performed_at' => $lastPo->created_at,
+                    'next_available_at' => $nextAvailableAt,
+                ], 422);
+            }
         }
 
         // Non-certified: block if already has a PO on the same date
         if (!$tec->isCertificado()) {
             $sameDay = FcaPo::where('fca_period_id', $period->id)
                 ->where('tecnico_id', $req->tecnico_id)
-                ->where('supervisor_id', $supervisorId)
                 ->whereDate('po_date', $req->po_date)
                 ->exists();
 
