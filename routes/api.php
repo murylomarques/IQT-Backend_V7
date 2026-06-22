@@ -93,9 +93,11 @@ Route::middleware('api')->group(function () {
             Route::get('/atendimentos/{id}', [ManutencaoController::class, 'showAtendimento']);
             Route::get('/fiscais/{id}/agenda', [ManutencaoController::class, 'agendaFiscal']);
             Route::get('/agenda/minhas-vistorias-hoje', [ManutencaoController::class, 'minhasVistoriasHoje']);
+            Route::get('/agenda-gantt', [ManutencaoController::class, 'ganttManutencao']);
             Route::get('/agenda/{agenda}', [ManutencaoController::class, 'showAgenda']);
             Route::post('/agenda', [ManutencaoController::class, 'storeAgenda']);
             Route::get('/vistorias/backlog', [ManutencaoController::class, 'backlog']);
+            Route::get('/vistorias/{vistoria}/data-pdf', [ManutencaoController::class, 'dataForPdf']);
             Route::get('/vistorias/{vistoria}', [ManutencaoController::class, 'showVistoria']);
             Route::post('/vistorias', [ManutencaoController::class, 'storeVistoria']);
             Route::post('/checklist-itens/{item}/resolver', [ManutencaoController::class, 'resolverItem']);
@@ -127,6 +129,7 @@ Route::middleware('api')->group(function () {
         Route::get('/vistorias-seguranca', [VistoriaSegurancaController::class, 'index']);
         Route::get('/export/seguranca', [ExportController::class, 'exportSeguranca']);
         Route::get('/export/qualidade', [ExportController::class, 'exportQualidade']);
+        Route::get('/export/manutencao', [ExportController::class, 'exportManutencao']);
         Route::patch('/vistorias-seguranca/{vistoria}/invalidar', [ExportController::class, 'invalidar']);
 
         // Chat e notificacoes

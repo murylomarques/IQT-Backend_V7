@@ -24,6 +24,9 @@ class FcaUser extends Authenticatable
         'territory',
         'regional',
         'title',
+        'data_admissao',
+        'data_demissao',
+        'observacao',
         'token',
     ];
 

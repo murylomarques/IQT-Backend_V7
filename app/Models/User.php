@@ -72,5 +72,8 @@ class User extends Authenticatable
         return $this->belongsTo(Empresa::class, 'empresa_id');
     }
 
-    // Você pode adicionar outras relações aqui, como supervisor e regional, se precisar.
+    public function supervisor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'supervisor_id');
+    }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Vistoria;
+use App\Models\VistoriaManutencao;
 use App\Models\VistoriaSeguranca;
 use Carbon\Carbon;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -374,6 +375,130 @@ class ExportController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
+    }
+
+    public function exportManutencao(Request $request): StreamedResponse
+    {
+        $validated = $request->validate([
+            'start_date' => 'required|date_format:Y-m-d',
+            'end_date'   => 'required|date_format:Y-m-d|after_or_equal:start_date',
+        ]);
+
+        $startDate = Carbon::parse($validated['start_date'])->startOfDay();
+        $endDate   = Carbon::parse($validated['end_date'])->endOfDay();
+
+        $checklistKeys = [
+            'drop_novo_sem_reutilizacao',
+            'conectores_opticos_novos_adequados',
+            'cto_porta_cavidade_correta',
+            'drop_acomodado_aneis',
+            'drop_fixado_hellermann',
+            'poste_saida_equipado_padrao',
+            'catenaria_drop_ancorada_padrao',
+            'postes_passagem_equipados_padrao',
+            'trajeto_drop_ramal_normas',
+            'ptr_devidamente_equipado',
+            'riscos_qualidade_interrupcao',
+            'emenda_cabo_drop',
+            'fachada_equipada_padrao',
+            'entrada_drop_residencia_adequada',
+            'passagem_interna_drop_organizada',
+            'local_instalacao_onu_padrao',
+            'sinal_optico_cto_onu_padrao',
+            'tecnico_testes_orientou_wifi',
+            'cliente_satisfeito_atendimento',
+            'ambiente_limpo_organizado',
+        ];
+
+        $checklistHeaders = [];
+        foreach ($checklistKeys as $key) {
+            $checklistHeaders[] = "Status - {$key}";
+            $checklistHeaders[] = "Obs - {$key}";
+            $checklistHeaders[] = "StatusCorreção - {$key}";
+            $checklistHeaders[] = "ObsCorreção - {$key}";
+        }
+
+        $headers = array_merge([
+            'ID Vistoria',
+            'Data Vistoria',
+            'Tipo',
+            'Status do Laudo',
+            'Resultado Final',
+            'Metros Drop',
+            'Nome do Fiscal',
+            'Supervisor do Fiscal',
+            'Empresa do Técnico',
+            'Técnico',
+            'Regional',
+            'Cidade',
+            'Território',
+            'SA (Num. Compromisso)',
+            'Caso',
+            'Cliente',
+            'Endereço',
+            'Motivo Vistoria',
+            'Observações Gerais',
+        ], $checklistHeaders);
+
+        $response = new StreamedResponse(function () use ($headers, $startDate, $endDate, $checklistKeys) {
+            $handle = fopen('php://output', 'w');
+            fprintf($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+            fputcsv($handle, $headers);
+
+            VistoriaManutencao::with(['fiscal', 'fiscal.supervisor', 'agenda', 'checklistItens'])
+                ->whereBetween('created_at', [$startDate, $endDate])
+                ->chunk(200, function ($vistorias) use ($handle, $checklistKeys) {
+                    foreach ($vistorias as $vistoria) {
+                        $itemsMap = $vistoria->checklistItens->keyBy('item_key');
+
+                        $mainData = [
+                            $vistoria->id,
+                            optional($vistoria->created_at)->format('d/m/Y H:i'),
+                            $vistoria->tipo ?? 'N/A',
+                            $vistoria->status_laudo ?? 'N/A',
+                            $vistoria->resultado_final ?? 'N/A',
+                            $vistoria->metros_drop !== null ? $vistoria->metros_drop . ' m' : '',
+                            $vistoria->fiscal?->nome ?? 'N/A',
+                            $vistoria->fiscal?->supervisor?->nome ?? 'N/A',
+                            $vistoria->agenda?->empresa_tecnico ?? 'N/A',
+                            $vistoria->agenda?->nome_tecnico ?? 'N/A',
+                            $vistoria->agenda?->regional ?? 'N/A',
+                            $vistoria->agenda?->city ?? 'N/A',
+                            $vistoria->agenda?->territorio ?? 'N/A',
+                            $vistoria->agenda?->numero_compromisso ?? 'N/A',
+                            $vistoria->agenda?->caso ?? 'N/A',
+                            $vistoria->agenda?->nome_conta ?? 'N/A',
+                            $vistoria->agenda?->endereco ?? 'N/A',
+                            $vistoria->agenda?->motivo_vistoria ?? $vistoria->agenda?->tipo_trabalho ?? 'N/A',
+                            $vistoria->observacoes_gerais ?? '',
+                        ];
+
+                        $checklistData = [];
+                        foreach ($checklistKeys as $key) {
+                            if (isset($itemsMap[$key])) {
+                                $checklistData[] = $itemsMap[$key]->status ?? '';
+                                $checklistData[] = $itemsMap[$key]->observacao ?? '';
+                                $checklistData[] = $itemsMap[$key]->status_correcao ?? '';
+                                $checklistData[] = $itemsMap[$key]->observacao_correcao ?? '';
+                            } else {
+                                $checklistData[] = '';
+                                $checklistData[] = '';
+                                $checklistData[] = '';
+                                $checklistData[] = '';
+                            }
+                        }
+
+                        fputcsv($handle, array_merge($mainData, $checklistData));
+                    }
+                });
+
+            fclose($handle);
+        });
+
+        $response->headers->set('Content-Type', 'text/csv; charset=UTF-8');
+        $response->headers->set('Content-Disposition', 'attachment; filename="vistorias_manutencao.csv"');
+
+        return $response;
     }
 
     /**

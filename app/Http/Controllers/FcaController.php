@@ -161,33 +161,39 @@ class FcaController extends Controller
     public function createUser(Request $request)
     {
         $request->validate([
-            'name'        => 'required|string|max:255',
-            'usuario'     => 'required|string|unique:fca_users,usuario',
-            'email'       => 'nullable|email|unique:fca_users,email',
-            'password'    => 'required|string|min:6',
-            'role'        => 'required|in:admin,coordenacao,supervisao,tecnico,consulta',
-            'employee_id' => 'nullable|string|max:50',
-            'cpf'         => 'nullable|string|max:20',
-            'empresa'     => 'nullable|string|max:150',
-            'territory'   => 'nullable|string|max:100',
-            'regional'    => 'nullable|string|max:100',
-            'title'       => 'nullable|string|max:150',
-            'manager_id'  => 'nullable|integer|exists:fca_users,id',
+            'name'           => 'required|string|max:255',
+            'usuario'        => 'required|string|unique:fca_users,usuario',
+            'email'          => 'nullable|email|unique:fca_users,email',
+            'password'       => 'required|string|min:6',
+            'role'           => 'required|in:admin,coordenacao,supervisao,tecnico,consulta',
+            'employee_id'    => 'nullable|string|max:50',
+            'cpf'            => 'nullable|string|max:20',
+            'empresa'        => 'nullable|string|max:150',
+            'territory'      => 'nullable|string|max:100',
+            'regional'       => 'nullable|string|max:100',
+            'title'          => 'nullable|string|max:150',
+            'manager_id'     => 'nullable|integer|exists:fca_users,id',
+            'data_admissao'  => 'nullable|date',
+            'data_demissao'  => 'nullable|date',
+            'observacao'     => 'nullable|string',
         ]);
 
         $user = FcaUser::create([
-            'name'        => $request->name,
-            'usuario'     => $request->usuario,
-            'email'       => $request->email,
-            'password'    => Hash::make($request->password),
-            'role'        => $request->role,
-            'employee_id' => $request->employee_id,
-            'cpf'         => $request->cpf,
-            'empresa'     => $request->empresa,
-            'territory'   => $request->territory,
-            'regional'    => $request->regional,
-            'title'       => $request->title,
-            'manager_id'  => $request->manager_id,
+            'name'           => $request->name,
+            'usuario'        => $request->usuario,
+            'email'          => $request->email,
+            'password'       => Hash::make($request->password),
+            'role'           => $request->role,
+            'employee_id'    => $request->employee_id,
+            'cpf'            => $request->cpf,
+            'empresa'        => $request->empresa,
+            'territory'      => $request->territory,
+            'regional'       => $request->regional,
+            'title'          => $request->title,
+            'manager_id'     => $request->manager_id,
+            'data_admissao'  => $request->data_admissao,
+            'data_demissao'  => $request->data_demissao,
+            'observacao'     => $request->observacao,
         ]);
 
         return response()->json(['message' => 'Usuário criado.', 'user' => $this->formatUser($user)], 201);
@@ -197,22 +203,32 @@ class FcaController extends Controller
     {
         $user = FcaUser::findOrFail($id);
 
+        $actor = $request->attributes->get('fca_user');
+
         $request->validate([
-            'name'        => 'sometimes|string|max:255',
-            'usuario'     => 'sometimes|string|unique:fca_users,usuario,' . $id,
-            'email'       => 'sometimes|nullable|email|unique:fca_users,email,' . $id,
-            'password'    => 'sometimes|string|min:6',
-            'role'        => 'sometimes|in:admin,coordenacao,supervisao,tecnico,consulta',
-            'employee_id' => 'sometimes|nullable|string|max:50',
-            'cpf'         => 'sometimes|nullable|string|max:20',
-            'empresa'     => 'sometimes|nullable|string|max:150',
-            'territory'   => 'sometimes|nullable|string|max:100',
-            'regional'    => 'sometimes|nullable|string|max:100',
-            'title'       => 'sometimes|nullable|string|max:150',
-            'manager_id'  => 'sometimes|nullable|integer|exists:fca_users,id',
+            'name'          => 'sometimes|string|max:255',
+            'usuario'       => 'sometimes|string|unique:fca_users,usuario,' . $id,
+            'email'         => 'sometimes|nullable|email|unique:fca_users,email,' . $id,
+            'password'      => 'sometimes|string|min:6',
+            'role'          => 'sometimes|in:admin,coordenacao,supervisao,tecnico,consulta',
+            'employee_id'   => 'sometimes|nullable|string|max:50',
+            'cpf'           => 'sometimes|nullable|string|max:20',
+            'empresa'       => 'sometimes|nullable|string|max:150',
+            'territory'     => 'sometimes|nullable|string|max:100',
+            'regional'      => 'sometimes|nullable|string|max:100',
+            'title'         => 'sometimes|nullable|string|max:150',
+            'manager_id'    => 'sometimes|nullable|integer|exists:fca_users,id',
+            'data_admissao' => 'sometimes|nullable|date',
+            'data_demissao' => 'sometimes|nullable|date',
+            'observacao'    => 'sometimes|nullable|string',
         ]);
 
-        $data = $request->only(['name', 'usuario', 'email', 'role', 'employee_id', 'cpf', 'empresa', 'territory', 'regional', 'title', 'manager_id']);
+        $data = $request->only(['name', 'usuario', 'email', 'role', 'employee_id', 'cpf', 'empresa', 'territory', 'regional', 'title', 'manager_id', 'data_admissao', 'observacao']);
+
+        // data_demissao só pode ser editada por admin
+        if ($actor->role === 'admin' && $request->has('data_demissao')) {
+            $data['data_demissao'] = $request->data_demissao;
+        }
 
         if ($request->filled('password')) {
             $data['password'] = Hash::make($request->password);
@@ -406,6 +422,9 @@ class FcaController extends Controller
             'supervisor',
             'coordenador',
             'hierarquia_completa',
+            'data_admissao',
+            'data_demissao',
+            'observacao',
             'created_at',
         ]);
 
@@ -426,6 +445,9 @@ class FcaController extends Controller
                 $hierarchy['supervisor'],
                 $hierarchy['coordenador'],
                 $hierarchy['hierarquia_completa'],
+                $u->data_admissao ?? '',
+                $u->data_demissao ?? '',
+                $u->observacao ?? '',
                 $u->created_at?->format('Y-m-d'),
             ]);
         }
@@ -497,20 +519,23 @@ class FcaController extends Controller
     private function formatUser(FcaUser $user): array
     {
         return [
-            'id'           => $user->id,
-            'name'         => $user->name,
-            'usuario'      => $user->usuario,
-            'email'        => $user->email,
-            'role'         => $user->role,
-            'employee_id'  => $user->employee_id,
-            'cpf'          => $user->cpf,
-            'empresa'      => $user->empresa,
-            'territory'    => $user->territory,
-            'regional'     => $user->regional,
-            'title'        => $user->title,
-            'manager_id'   => $user->manager_id,
-            'manager_name' => $user->relationLoaded('manager') ? ($user->manager->name ?? null) : null,
-            'created_at'   => $user->created_at?->format('Y-m-d'),
+            'id'             => $user->id,
+            'name'           => $user->name,
+            'usuario'        => $user->usuario,
+            'email'          => $user->email,
+            'role'           => $user->role,
+            'employee_id'    => $user->employee_id,
+            'cpf'            => $user->cpf,
+            'empresa'        => $user->empresa,
+            'territory'      => $user->territory,
+            'regional'       => $user->regional,
+            'title'          => $user->title,
+            'manager_id'     => $user->manager_id,
+            'manager_name'   => $user->relationLoaded('manager') ? ($user->manager->name ?? null) : null,
+            'data_admissao'  => $user->data_admissao,
+            'data_demissao'  => $user->data_demissao,
+            'observacao'     => $user->observacao,
+            'created_at'     => $user->created_at?->format('Y-m-d'),
         ];
     }
 

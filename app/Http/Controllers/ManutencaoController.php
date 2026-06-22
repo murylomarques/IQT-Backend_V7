@@ -396,6 +396,20 @@ class ManutencaoController extends Controller
             $concluidosQuery->whereHas('agenda', function ($q) use ($empresaNome) {
                 $q->where('empresa_tecnico', $empresaNome);
             });
+
+            // Segmentação por regional: se o usuário tem regional vinculada, filtra por ela
+            if ($user->regional_id) {
+                $regional = \App\Models\Regional::find($user->regional_id);
+                if ($regional) {
+                    $regionalNome = $regional->nome;
+                    $query->whereHas('agenda', function ($q) use ($regionalNome) {
+                        $q->where('regional', $regionalNome);
+                    });
+                    $concluidosQuery->whereHas('agenda', function ($q) use ($regionalNome) {
+                        $q->where('regional', $regionalNome);
+                    });
+                }
+            }
         }
 
         $vistorias = $query->with([
@@ -510,5 +524,28 @@ class ManutencaoController extends Controller
         }
 
         return response()->json($item);
+    }
+
+    public function dataForPdf(VistoriaManutencao $vistoria)
+    {
+        $vistoria->load(['agenda', 'fiscal', 'checklistItens']);
+        return response()->json($vistoria);
+    }
+
+    public function ganttManutencao(Request $request)
+    {
+        $request->validate(['date' => 'nullable|date_format:Y-m-d']);
+        $date = $request->input('date') ? Carbon::parse($request->input('date')) : Carbon::today();
+
+        $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get();
+
+        $agendamentos = AgendaManutencao::whereDate('data_agendamento', $date)
+            ->with('fiscal:id,nome')
+            ->get();
+
+        return response()->json([
+            'resources' => $fiscais,
+            'tasks' => $agendamentos,
+        ]);
     }
 }
