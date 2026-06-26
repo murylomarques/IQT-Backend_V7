@@ -9,6 +9,7 @@ use App\Http\Controllers\AgendaController;
 use App\Http\Controllers\Api\AtendimentoController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\HomeController;
+use App\Http\Controllers\Api\MoaviController;
 use App\Http\Controllers\VistoriaController;
 
 use App\Http\Controllers\UserController;
@@ -32,6 +33,18 @@ use App\Http\Middleware\IsAdmin;
 use App\Services\ActivityLogService;
 
 Route::middleware('api')->group(function () {
+
+    Route::prefix('v1/moavi')->group(function () {
+        Route::post('/auth/token', [MoaviController::class, 'token'])->middleware('throttle:moavi-token');
+
+        Route::middleware(['moavi.auth:moavi:read', 'throttle:moavi-api'])->group(function () {
+            Route::get('/agendamentos', [MoaviController::class, 'period']);
+            Route::get('/agendamentos/proximos-15-dias', [MoaviController::class, 'next15Days']);
+        });
+
+        Route::post('/agendamentos/alteracoes', [MoaviController::class, 'changes'])
+            ->middleware(['moavi.auth:moavi:changes', 'throttle:moavi-api']);
+    });
 
     // Login (publico)
     Route::post('/login', function(Request $request) {

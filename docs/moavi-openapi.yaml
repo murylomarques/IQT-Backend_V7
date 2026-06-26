@@ -1,0 +1,105 @@
+openapi: 3.1.0
+info:
+  title: Moavi API
+  version: 1.0.0
+servers:
+  - url: /api/v1/moavi
+security:
+  - bearerAuth: []
+paths:
+  /auth/token:
+    post:
+      security: []
+      summary: Emite token Bearer para integracao Moavi.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, client_secret]
+              properties:
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+      responses:
+        "200":
+          description: Token emitido.
+        "401":
+          description: Client invalido.
+  /agendamentos:
+    get:
+      summary: Lista agendamentos por periodo de ate 30 dias.
+      parameters:
+        - name: inicio
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            minimum: "2026-01-01"
+        - name: fim
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 500
+            maximum: 2000
+        - name: page_token
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista paginada com sync_key.
+  /agendamentos/proximos-15-dias:
+    get:
+      summary: Lista agendamentos de hoje ate hoje + 15 dias.
+      parameters:
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 500
+            maximum: 2000
+        - name: page_token
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lista paginada com sync_key.
+  /agendamentos/alteracoes:
+    post:
+      summary: Retorna somente alteracoes desde uma sync_key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sync_key]
+              properties:
+                sync_key:
+                  type: string
+                page_size:
+                  type: integer
+                  default: 500
+                  maximum: 2000
+                page_token:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Alteracoes paginadas.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
