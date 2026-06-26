@@ -137,6 +137,7 @@ components:
         status:
           type: string
           nullable: true
+          enum: [concluido, agendado, cancelado]
     AppointmentListResponse:
       type: object
       properties:

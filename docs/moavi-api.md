@@ -87,6 +87,12 @@ Filtros fixos aplicados na fonte:
 - `micro_territorio = Praia Grande`
 - `empresa_tecnico = Desktop`
 
+Normalizacao de `status`:
+
+- `Concluída` -> `concluido`
+- `Canceled` -> `cancelado`
+- `Agendado`, `Suspensa`, `Em deslocamento`, `Chegada no Local`, `Despachado`, `On Hold`, `Em execução` -> `agendado`
+
 ## Proximos 15 dias
 
 `GET /api/v1/moavi/agendamentos/proximos-15-dias?page_size=500`
