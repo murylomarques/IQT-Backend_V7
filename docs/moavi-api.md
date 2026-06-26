@@ -65,7 +65,27 @@ Regras:
 - janela maxima inclusiva de 30 dias
 - registros sem `data_agendamento` nao entram
 
-A resposta retorna `sync_key`, paginação e todos os campos da fonte.
+A resposta retorna `sync_key`, paginação e somente os campos contratados abaixo.
+
+Cada item retorna somente:
+
+```json
+{
+  "cnpj_empresa": "08.170.849/0053-46",
+  "id": "...",
+  "numero_compromisso": "...",
+  "dt_abertura": "2026-06-01 08:00:00",
+  "data_primeiro_agendamento": "...",
+  "tipo_trabalho": "Manutenção",
+  "termino_servico": "2026-06-01 10:00:00",
+  "status": "Concluída"
+}
+```
+
+Filtros fixos aplicados na fonte:
+
+- `micro_territorio = Praia Grande`
+- `empresa_tecnico = Desktop`
 
 ## Proximos 15 dias
 

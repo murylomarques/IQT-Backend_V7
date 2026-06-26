@@ -400,7 +400,15 @@ class MoaviSyncService
             ->select($this->mapper->columns())
             ->whereNotNull('data_agendamento')
             ->where('data_agendamento', '>=', $from)
-            ->where('data_agendamento', '<', $to);
+            ->where('data_agendamento', '<', $to)
+            ->whereRaw(
+                "LOWER(REPLACE(REPLACE(REPLACE(COALESCE(micro_territorio, ''), ' ', ''), '_', ''), '-', '')) = ?",
+                [$this->normalizedFilter('micro_territorio')]
+            )
+            ->whereRaw(
+                "LOWER(REPLACE(REPLACE(REPLACE(COALESCE(empresa_tecnico, ''), ' ', ''), '_', ''), '-', '')) = ?",
+                [$this->normalizedFilter('empresa_tecnico')]
+            );
     }
 
     private function activeSession(int $sessionId, stdClass $client): stdClass
@@ -473,5 +481,12 @@ class MoaviSyncService
     private function now(): string
     {
         return Carbon::now($this->timezone())->format('Y-m-d H:i:s');
+    }
+
+    private function normalizedFilter(string $key): string
+    {
+        $value = (string) config('moavi.source_filters.' . $key, '');
+
+        return strtolower(str_replace([' ', '_', '-'], '', trim($value)));
     }
 }

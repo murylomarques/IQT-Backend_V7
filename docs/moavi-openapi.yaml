@@ -58,6 +58,10 @@ paths:
       responses:
         "200":
           description: Lista paginada com sync_key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentListResponse"
   /agendamentos/proximos-15-dias:
     get:
       summary: Lista agendamentos de hoje ate hoje + 15 dias.
@@ -75,6 +79,10 @@ paths:
       responses:
         "200":
           description: Lista paginada com sync_key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppointmentListResponse"
   /agendamentos/alteracoes:
     post:
       summary: Retorna somente alteracoes desde uma sync_key.
@@ -103,3 +111,40 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+  schemas:
+    Appointment:
+      type: object
+      additionalProperties: false
+      properties:
+        cnpj_empresa:
+          type: string
+        id:
+          type: string
+        numero_compromisso:
+          type: string
+        dt_abertura:
+          type: string
+          nullable: true
+        data_primeiro_agendamento:
+          type: string
+          nullable: true
+        tipo_trabalho:
+          type: string
+          nullable: true
+        termino_servico:
+          type: string
+          nullable: true
+        status:
+          type: string
+          nullable: true
+    AppointmentListResponse:
+      type: object
+      properties:
+        request_id:
+          type: string
+        sync_key:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Appointment"

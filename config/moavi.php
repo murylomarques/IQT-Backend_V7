@@ -5,6 +5,10 @@ return [
 
     'source_connection' => env('MOAVI_SOURCE_CONNECTION', 'melhoria_continua'),
     'source_table' => env('MOAVI_SOURCE_TABLE', 'agendamentos_geovane'),
+    'source_filters' => [
+        'micro_territorio' => env('MOAVI_FILTER_MICRO_TERRITORIO', 'praiagrande'),
+        'empresa_tecnico' => env('MOAVI_FILTER_EMPRESA_TECNICO', 'desktop'),
+    ],
 
     'company_cnpj' => env('MOAVI_COMPANY_CNPJ', '08.170.849/0053-46'),
     'timezone' => env('MOAVI_TIMEZONE', 'America/Sao_Paulo'),
