@@ -172,14 +172,61 @@ class FcaFormController extends Controller
     // ── GET /fcaf/analytics/all (admin) ──────────────────────────────────────
     public function analyticsAll(Request $req)
     {
+        return response()->json($this->analyticsAllPayload($req));
+    }
+
+    public function exportAnalyticsAll(Request $req)
+    {
+        $payload = $this->analyticsAllPayload($req);
+
+        $lines = [];
+        $lines[] = $this->csvLine([
+            'id',
+            'name',
+            'email',
+            'role',
+            'manager_id',
+            'supervisor_id',
+            'supervisor_name',
+            'supervisor_email',
+            'supervisor_role',
+        ]);
+
+        foreach (($payload['supervisors'] ?? []) as $supervisor) {
+            foreach (($supervisor['tecnicos'] ?? []) as $tecnico) {
+                $tecnicoUser = $tecnico['tecnico_user'] ?? null;
+                $supervisorData = $tecnico['supervisor'] ?? null;
+
+                $lines[] = $this->csvLine([
+                    $tecnicoUser['id'] ?? $tecnico['tecnico_user_id'] ?? $tecnico['id'] ?? '',
+                    $tecnicoUser['name'] ?? $tecnico['nome'] ?? '',
+                    $tecnicoUser['email'] ?? '',
+                    $tecnicoUser['role'] ?? 'tecnico',
+                    $tecnicoUser['manager_id'] ?? ($supervisorData['id'] ?? ''),
+                    $supervisorData['id'] ?? '',
+                    $supervisorData['name'] ?? '',
+                    $supervisorData['email'] ?? '',
+                    $supervisorData['role'] ?? '',
+                ]);
+            }
+        }
+
+        return response(implode("\n", $lines), 200, [
+            'Content-Type'        => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="fca_extracao_' . now()->format('Ymd') . '.csv"',
+        ]);
+    }
+
+    private function analyticsAllPayload(Request $req): array
+    {
         $period = $this->resolvePeriod($req);
         if (!$period) {
-            return response()->json([
+            return [
                 'period' => null,
                 'metrics' => $this->buildMetrics(collect()),
                 'supervisors' => [],
                 'filters' => $this->filterPayload($req),
-            ]);
+            ];
         }
 
         $selectedRegional = trim((string) $req->query('regional', ''));
@@ -242,12 +289,12 @@ class FcaFormController extends Controller
 
         $allTecnicos = $result->flatMap(fn($sup) => $sup['tecnicos']);
 
-        return response()->json([
+        return [
             'period' => $this->periodPayload($period),
             'metrics' => $this->buildMetrics($allTecnicos),
             'filters' => $this->filterPayload($req),
             'supervisors' => $result,
-        ]);
+        ];
     }
 
     // ── GET /fcaf/periods (admin) ─────────────────────────────────────────────
@@ -318,6 +365,13 @@ class FcaFormController extends Controller
             'id'            => $t->id,
             'nome'          => $t->nome,
             'tecnico_user_id' => $tecnicoUser?->id,
+            'tecnico_user'  => $tecnicoUser ? [
+                'id' => $tecnicoUser->id,
+                'name' => $tecnicoUser->name,
+                'email' => $tecnicoUser->email,
+                'role' => $tecnicoUser->role,
+                'manager_id' => $tecnicoUser->manager_id,
+            ] : null,
             'regional'      => $tecnicoUser?->regional ?? $supervisor?->regional,
             'territory'     => $tecnicoUser?->territory ?? $supervisor?->territory,
             'certificado'   => $t->certificado,
@@ -450,6 +504,17 @@ class FcaFormController extends Controller
         return mb_strtoupper(trim((string) $left)) === mb_strtoupper(trim($right));
     }
 
+    private function csvLine(array $fields): string
+    {
+        $handle = fopen('php://temp', 'r+');
+        fputcsv($handle, $fields, ',', '"', '');
+        rewind($handle);
+        $line = rtrim(stream_get_contents($handle), "\r\n");
+        fclose($handle);
+
+        return $line;
+    }
+
     private function formatSupervisor(?FcaUser $supervisor): ?array
     {
         if (!$supervisor) return null;
@@ -457,6 +522,9 @@ class FcaFormController extends Controller
         return [
             'id' => $supervisor->id,
             'name' => $supervisor->name,
+            'email' => $supervisor->email,
+            'role' => $supervisor->role,
+            'manager_id' => $supervisor->manager_id,
             'regional' => $supervisor->regional,
             'territory' => $supervisor->territory,
         ];

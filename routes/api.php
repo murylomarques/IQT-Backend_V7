@@ -216,6 +216,7 @@ Route::middleware('api')->group(function () {
         Route::get('/fcaf/tecnicos',         [FcaFormController::class, 'myTecnicos']);
         Route::get('/fcaf/analytics',        [FcaFormController::class, 'analytics']);
         Route::get('/fcaf/analytics/all',    [FcaFormController::class, 'analyticsAll'])->middleware('fca.admin_or_consulta');
+        Route::get('/fcaf/analytics/all/export', [FcaFormController::class, 'exportAnalyticsAll'])->middleware('fca.admin_or_consulta');
         Route::get('/fcaf/tecnico/{id}',     [FcaFormController::class, 'tecnicoDetail']);
 
         Route::get('/fcaf/tecnico/{id}/checklist', [FcaChecklistController::class, 'getForTecnico']);

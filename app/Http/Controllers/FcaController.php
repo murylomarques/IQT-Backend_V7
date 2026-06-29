@@ -402,59 +402,42 @@ class FcaController extends Controller
 
     public function exportCsv(Request $request)
     {
-        $users = FcaUser::with([
-            'manager:id,name,role,manager_id',
-            'manager.manager:id,name,role',
-        ])->where('role', 'tecnico')->orderBy('name')->get();
+        $users = FcaUser::with('manager:id,name,email,role')
+            ->orderBy('name')
+            ->get();
 
         $lines   = [];
         $lines[] = $this->csvLine([
             'id',
-            'usuario',
+            'name',
             'email',
             'role',
-            'employee_id',
-            'cpf',
-            'territory',
-            'regional',
-            'title',
-            'tecnico',
-            'supervisor',
-            'coordenador',
-            'hierarquia_completa',
-            'data_admissao',
-            'data_demissao',
-            'observacao',
-            'created_at',
+            'manager_id',
+            'supervisor_id',
+            'supervisor_name',
+            'supervisor_email',
+            'supervisor_role',
         ]);
 
         foreach ($users as $u) {
-            $hierarchy = $this->resolveHierarchyColumns($u);
+            $supervisor = $u->manager;
 
             $lines[] = $this->csvLine([
                 $u->id,
-                $u->usuario,
+                $u->name,
                 $u->email ?? '',
                 $u->role,
-                $u->employee_id ?? '',
-                $u->cpf ?? '',
-                $u->territory ?? '',
-                $u->regional ?? '',
-                $u->title ?? '',
-                $hierarchy['tecnico'],
-                $hierarchy['supervisor'],
-                $hierarchy['coordenador'],
-                $hierarchy['hierarquia_completa'],
-                $u->data_admissao ?? '',
-                $u->data_demissao ?? '',
-                $u->observacao ?? '',
-                $u->created_at?->format('Y-m-d'),
+                $u->manager_id ?? '',
+                $supervisor?->id ?? '',
+                $supervisor?->name ?? '',
+                $supervisor?->email ?? '',
+                $supervisor?->role ?? '',
             ]);
         }
 
         return response(implode("\n", $lines), 200, [
             'Content-Type'        => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="usuarios_fca_hierarquia_' . now()->format('Ymd') . '.csv"',
+            'Content-Disposition' => 'attachment; filename="usuarios_gh_hierarquia_' . now()->format('Ymd') . '.csv"',
         ]);
     }
 
