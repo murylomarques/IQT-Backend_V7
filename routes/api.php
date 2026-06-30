@@ -107,9 +107,12 @@ Route::middleware('api')->group(function () {
             Route::get('/fiscais/{id}/agenda', [ManutencaoController::class, 'agendaFiscal']);
             Route::get('/agenda/minhas-vistorias-hoje', [ManutencaoController::class, 'minhasVistoriasHoje']);
             Route::get('/agenda-gantt', [ManutencaoController::class, 'ganttManutencao']);
+            Route::patch('/agenda-gantt/{agenda}', [ManutencaoController::class, 'updateGantt']);
             Route::get('/agenda/{agenda}', [ManutencaoController::class, 'showAgenda']);
             Route::post('/agenda', [ManutencaoController::class, 'storeAgenda']);
+            Route::delete('/agenda/{agenda}', [ManutencaoController::class, 'destroyAgenda']);
             Route::get('/vistorias/backlog', [ManutencaoController::class, 'backlog']);
+            Route::get('/vistorias/ids-por-periodo', [ManutencaoController::class, 'getIdsByDateRange']);
             Route::get('/vistorias/{vistoria}/data-pdf', [ManutencaoController::class, 'dataForPdf']);
             Route::get('/vistorias/{vistoria}', [ManutencaoController::class, 'showVistoria']);
             Route::post('/vistorias', [ManutencaoController::class, 'storeVistoria']);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AgendaManutencao;
 use App\Models\BaseManutencao;
+use App\Models\Regional;
 use App\Models\User;
 use App\Models\VistoriaManutencao;
 use App\Models\VistoriaManutencaoChecklistItem;
@@ -14,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class ManutencaoController extends Controller
 {
@@ -27,6 +29,11 @@ class ManutencaoController extends Controller
         return ['Não', 'Nao'];
     }
 
+    private function normalizeAnswer(?string $value): string
+    {
+        return trim(preg_replace('/\s+/', ' ', strtolower(Str::ascii($value ?? ''))));
+    }
+
     private function applyIssueFilter($query)
     {
         return $query->where(function (Builder $q) {
@@ -38,22 +45,42 @@ class ManutencaoController extends Controller
                 ->orWhere(function (Builder $sub) {
                     $sub->where('item_key', 'cliente_satisfeito_atendimento')
                         ->whereIn('status', $this->getNaoValues());
+                })
+                ->orWhere(function (Builder $sub) {
+                    $sub->where('item_key', 'retorno_tecnico')
+                        ->where('status', 'Sim');
                 });
         });
     }
 
     private function isIssueItem(string $key, ?string $status): bool
     {
-        if (in_array($status, $this->getNaoConformeValues(), true)) {
+        $normalizedStatus = $this->normalizeAnswer($status);
+
+        if ($normalizedStatus === 'nao conforme') {
             return true;
         }
 
-        if (in_array($key, ['riscos_qualidade_interrupcao', 'emenda_cabo_drop'], true) && $status === 'Sim') {
+        if (in_array($key, ['riscos_qualidade_interrupcao', 'emenda_cabo_drop', 'retorno_tecnico'], true)
+            && $normalizedStatus === 'sim') {
             return true;
         }
 
         return $key === 'cliente_satisfeito_atendimento'
-            && in_array($status, $this->getNaoValues(), true);
+            && $normalizedStatus === 'nao';
+    }
+
+    private function isRetornoTecnicoSolicitado(?string $value): bool
+    {
+        return $this->normalizeAnswer($value) === 'sim';
+    }
+
+    private function markOverdueBacklogItems(): void
+    {
+        VistoriaManutencao::query()
+            ->where('status_laudo', '!=', 'Finalizado')
+            ->where('created_at', '<', now()->subHours(72))
+            ->update(['status_laudo' => 'Vencido']);
     }
 
     public function atendimentos(Request $request)
@@ -277,7 +304,8 @@ class ManutencaoController extends Controller
             'agenda_manutencao_id' => 'required|exists:agenda_manutencao,id',
             'tipo' => 'required|string|in:completa,externa',
             'metros_drop' => 'required|integer|min:0',
-            'resultado_final' => 'required|string|in:Aprovado,Aprovado com Ressalvas,Reprovado',
+            'retorno_tecnico' => 'required|string|in:Sim,Não,Nao',
+            'resultado_final' => 'nullable|string|in:Aprovado,Aprovado com Ressalvas,Reprovado',
             'observacoes_gerais' => 'nullable|string',
             'checklist' => 'required|array',
             'checklist.*.status' => 'required|string|in:Conforme,Não Conforme,Nao Conforme,Não se Aplica,Nao se Aplica,Sim,Não,Nao',
@@ -293,6 +321,23 @@ class ManutencaoController extends Controller
         $agenda = AgendaManutencao::findOrFail($validatedData['agenda_manutencao_id']);
         $storedPaths = [];
 
+        $missingEvidence = [];
+        foreach ($validatedData['checklist'] as $key => $itemData) {
+            if ($this->isIssueItem($key, $itemData['status'] ?? null)
+                && !$request->hasFile("checklist.{$key}.foto")) {
+                $missingEvidence["checklist.{$key}.foto"] = [
+                    'A foto e obrigatoria para respostas nao conformes.',
+                ];
+            }
+        }
+
+        if (!empty($missingEvidence)) {
+            return response()->json([
+                'message' => 'Anexe fotos para todos os itens nao conformes.',
+                'errors' => $missingEvidence,
+            ], 422);
+        }
+
         DB::beginTransaction();
 
         try {
@@ -304,14 +349,21 @@ class ManutencaoController extends Controller
                 }
             }
 
+            $retornoSolicitado = $this->isRetornoTecnicoSolicitado($validatedData['retorno_tecnico']);
+            $resultadoFinal = $temPendencia
+                ? 'Reprovado'
+                : ($retornoSolicitado ? 'Aprovado com Ressalvas' : 'Aprovado');
+            $statusLaudo = ($temPendencia || $retornoSolicitado) ? 'Em Correção' : 'Finalizado';
+
             $vistoria = VistoriaManutencao::create([
                 'agenda_manutencao_id' => $agenda->id,
                 'fiscal_id' => Auth::id(),
                 'tipo' => $validatedData['tipo'],
                 'metros_drop' => $validatedData['metros_drop'],
-                'resultado_final' => $validatedData['resultado_final'],
+                'retorno_tecnico' => $validatedData['retorno_tecnico'],
+                'resultado_final' => $resultadoFinal,
                 'observacoes_gerais' => $validatedData['observacoes_gerais'] ?? null,
-                'status_laudo' => $temPendencia ? 'Em Correção' : 'Finalizado',
+                'status_laudo' => $statusLaudo,
             ]);
 
             foreach ($validatedData['checklist'] as $key => $itemData) {
@@ -329,10 +381,19 @@ class ManutencaoController extends Controller
                 ]);
             }
 
+            if ($retornoSolicitado) {
+                $vistoria->checklistItens()->create([
+                    'item_key' => 'retorno_tecnico',
+                    'status' => 'Sim',
+                    'observacao' => 'Retorno do tecnico solicitado pelo fiscal.',
+                    'foto_path' => null,
+                ]);
+            }
+
             $agenda->update([
                 'status' => 'Concluído',
                 'statusAgendamento' => 'Concluído',
-                'statusLaudo' => $temPendencia ? 'Reprovado' : 'Concluído',
+                'statusLaudo' => ($temPendencia || $retornoSolicitado) ? 'Reprovado' : 'Concluído',
             ]);
 
             DB::commit();
@@ -353,12 +414,14 @@ class ManutencaoController extends Controller
 
     public function backlog()
     {
+        $this->markOverdueBacklogItems();
+
         $user = Auth::user();
         $empresaNome = $user->empresa?->nome ?? null;
 
         $query = VistoriaManutencao::query()
-            ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'resultado_final', 'status_laudo', 'created_at'])
-            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
+            ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'retorno_tecnico', 'resultado_final', 'status_laudo', 'created_at'])
+            ->where('status_laudo', '!=', 'Finalizado')
             ->withCount([
                 'checklistItens as itens_nao_conformes' => function (Builder $q) {
                     $this->applyIssueFilter($q);
@@ -399,7 +462,7 @@ class ManutencaoController extends Controller
 
             // Segmentação por regional: se o usuário tem regional vinculada, filtra por ela
             if ($user->regional_id) {
-                $regional = \App\Models\Regional::find($user->regional_id);
+                $regional = Regional::find($user->regional_id);
                 if ($regional) {
                     $regionalNome = $regional->nome;
                     $query->whereHas('agenda', function ($q) use ($regionalNome) {
@@ -421,7 +484,7 @@ class ManutencaoController extends Controller
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->format('Y-m-d H:i');
             $deadline = $vistoria->created_at?->copy()->addHours(72);
-            $slaStatus = ($deadline && now()->gt($deadline)) ? 'Vencido' : 'No Prazo';
+            $slaStatus = ($vistoria->status_laudo === 'Vencido' || ($deadline && now()->gt($deadline))) ? 'Vencido' : 'No Prazo';
 
             $correcaoStatus = 'Sem pendencia';
             if (($vistoria->itens_em_analise ?? 0) > 0) {
@@ -430,6 +493,8 @@ class ManutencaoController extends Controller
                 $correcaoStatus = 'Aguardando resposta';
             } elseif (($vistoria->itens_nao_conformes ?? 0) > 0) {
                 $correcaoStatus = 'Aguardando resposta';
+            } elseif ($this->isRetornoTecnicoSolicitado($vistoria->retorno_tecnico)) {
+                $correcaoStatus = 'Retorno tecnico solicitado';
             }
 
             return [
@@ -447,6 +512,7 @@ class ManutencaoController extends Controller
                 'sla' => $slaStatus,
                 'statusLaudo' => $vistoria->status_laudo,
                 'resultadoFinal' => $vistoria->resultado_final,
+                'retornoTecnico' => $vistoria->retorno_tecnico,
                 'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
                 'correcaoStatus' => $correcaoStatus,
             ];
@@ -530,6 +596,57 @@ class ManutencaoController extends Controller
     {
         $vistoria->load(['agenda', 'fiscal', 'checklistItens']);
         return response()->json($vistoria);
+    }
+
+    public function getIdsByDateRange(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 422);
+        }
+
+        $ids = VistoriaManutencao::query()
+            ->whereBetween('created_at', [
+                $request->start_date . ' 00:00:00',
+                $request->end_date . ' 23:59:59',
+            ])
+            ->pluck('id');
+
+        return response()->json($ids);
+    }
+
+    public function updateGantt(Request $request, AgendaManutencao $agenda)
+    {
+        $validated = $request->validate([
+            'data_agendamento' => 'sometimes|required|date_format:Y-m-d',
+            'fiscal_id' => 'sometimes|required|exists:users,id',
+            'hora_agendamento' => 'sometimes|nullable|date_format:H:i',
+        ]);
+
+        DB::transaction(function () use ($agenda, $validated) {
+            $agenda->vistorias()->get()->each->delete();
+
+            $agenda->update(array_merge($validated, [
+                'status' => 'Agendado',
+                'statusAgendamento' => 'Pendente',
+                'statusLaudo' => 'Pendente',
+            ]));
+        });
+
+        $agenda->load('fiscal:id,nome');
+
+        return response()->json($agenda);
+    }
+
+    public function destroyAgenda(AgendaManutencao $agenda)
+    {
+        $agenda->delete();
+
+        return response()->json(['message' => 'Agendamento de manutencao removido com sucesso.']);
     }
 
     public function ganttManutencao(Request $request)

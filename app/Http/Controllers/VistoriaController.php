@@ -16,7 +16,7 @@ class VistoriaController extends Controller
 {
     private function getNaoConformeValues(): array
     {
-        return ['Não Conforme', 'NÃ£o Conforme'];
+        return ['Não Conforme', 'Nao Conforme', 'NÃ£o Conforme'];
     }
 
     private function getEmAnaliseStatusValue(): string
@@ -60,7 +60,7 @@ class VistoriaController extends Controller
             'retorno_tecnico'  => 'nullable|string|max:100',
             'observacoes_gerais' => 'nullable|string',
             'checklist'        => 'required|array',
-            'checklist.*.status'    => 'required|string|in:Conforme,Não Conforme,Não se Aplica,NÃ£o Conforme,NÃ£o se Aplica',
+            'checklist.*.status'    => 'required|string|in:Conforme,Não Conforme,Nao Conforme,Não se Aplica,Nao se Aplica,NÃ£o Conforme,NÃ£o se Aplica',
             'checklist.*.observacao' => 'nullable|string|max:1000',
             'checklist.*.foto'      => 'nullable|image|mimes:jpeg,png,jpg,webp|max:2048',
         ]);
@@ -71,6 +71,23 @@ class VistoriaController extends Controller
 
         $validatedData = $validator->validated();
         $agenda = Agenda::findOrFail($validatedData['agenda_id']);
+
+        $missingEvidence = [];
+        foreach ($validatedData['checklist'] as $key => $itemData) {
+            if (in_array($itemData['status'], $this->getNaoConformeValues(), true)
+                && !$request->hasFile("checklist.{$key}.foto")) {
+                $missingEvidence["checklist.{$key}.foto"] = [
+                    'A foto e obrigatoria para respostas nao conformes.',
+                ];
+            }
+        }
+
+        if (!empty($missingEvidence)) {
+            return response()->json([
+                'message' => 'Anexe fotos para todos os itens nao conformes.',
+                'errors' => $missingEvidence,
+            ], 422);
+        }
 
         $storedPaths = [];
 
@@ -85,7 +102,8 @@ class VistoriaController extends Controller
                 break;
             }
         }
-        $statusInicialLaudo = $temNaoConforme ? 'Em Correção' : 'Finalizado';
+        $retornoSolicitado = ($validatedData['retorno_tecnico'] ?? null) === 'Sim';
+        $statusInicialLaudo = ($temNaoConforme || $retornoSolicitado) ? 'Em Correção' : 'Finalizado';
 
         $vistoria = Vistoria::create([
             'agenda_id'        => $agenda->id,

@@ -408,6 +408,7 @@ class ExportController extends Controller
             'tecnico_testes_orientou_wifi',
             'cliente_satisfeito_atendimento',
             'ambiente_limpo_organizado',
+            'retorno_tecnico',
         ];
 
         $checklistHeaders = [];
@@ -424,6 +425,7 @@ class ExportController extends Controller
             'Tipo',
             'Status do Laudo',
             'Resultado Final',
+            'Retorno Tecnico',
             'Metros Drop',
             'Nome do Fiscal',
             'Supervisor do Fiscal',
@@ -457,6 +459,7 @@ class ExportController extends Controller
                             $vistoria->tipo ?? 'N/A',
                             $vistoria->status_laudo ?? 'N/A',
                             $vistoria->resultado_final ?? 'N/A',
+                            $vistoria->retorno_tecnico ?? 'N/A',
                             $vistoria->metros_drop !== null ? $vistoria->metros_drop . ' m' : '',
                             $vistoria->fiscal?->nome ?? 'N/A',
                             $vistoria->fiscal?->supervisor?->nome ?? 'N/A',

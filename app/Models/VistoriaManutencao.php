@@ -18,6 +18,7 @@ class VistoriaManutencao extends Model
         'fiscal_id',
         'tipo',
         'metros_drop',
+        'retorno_tecnico',
         'resultado_final',
         'observacoes_gerais',
         'status_laudo',
