@@ -13,6 +13,8 @@ class MoaviAppointmentMapper
         'dt_abertura',
         'data_primeiro_agendamento',
         'tipo_trabalho',
+        'inicio_agendado',
+        'termino_agendado',
         'inicio_servico',
         'termino_servico',
         'status',

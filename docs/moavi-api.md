@@ -78,6 +78,8 @@ Cada item retorna somente:
   "dt_abertura": "2026-06-01 08:00:00",
   "data_primeiro_agendamento": "...",
   "tipo_trabalho": "Manutenção",
+  "inicio_agendado": "2026-06-01 08:30:00",
+  "termino_agendado": "2026-06-01 09:30:00",
   "inicio_servico": "2026-06-01 09:00:00",
   "termino_servico": "2026-06-01 10:00:00",
   "status": "Concluída"
@@ -119,6 +121,6 @@ Retorna somente:
 - `updated`: registro existente com hash diferente
 - `removed`: registro removido da janela ou apagado da fonte
 
-As alteracoes `created` e `updated` retornam o objeto `item` com os mesmos campos do item acima, incluindo `inicio_servico`, `termino_servico` e `claseter`.
+As alteracoes `created` e `updated` retornam o objeto `item` com os mesmos campos do item acima, incluindo `inicio_agendado`, `termino_agendado`, `inicio_servico`, `termino_servico` e `claseter`.
 
 Quando `pagination.has_more` for `false`, grave o `next_sync_key` para a proxima sincronizacao.

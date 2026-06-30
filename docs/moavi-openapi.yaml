@@ -134,6 +134,12 @@ components:
         tipo_trabalho:
           type: string
           nullable: true
+        inicio_agendado:
+          type: string
+          nullable: true
+        termino_agendado:
+          type: string
+          nullable: true
         inicio_servico:
           type: string
           nullable: true
