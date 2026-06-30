@@ -13,6 +13,7 @@ class MoaviAppointmentMapper
         'dt_abertura',
         'data_primeiro_agendamento',
         'tipo_trabalho',
+        'inicio_servico',
         'termino_servico',
         'status',
     ];
@@ -31,6 +32,7 @@ class MoaviAppointmentMapper
     {
         $payload = [
             'cnpj_empresa' => $companyCnpj ?: config('moavi.company_cnpj'),
+            'claseter' => 'PRAIA GRANDE',
         ];
 
         foreach (self::API_COLUMNS as $column) {

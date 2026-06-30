@@ -72,11 +72,13 @@ Cada item retorna somente:
 ```json
 {
   "cnpj_empresa": "08.170.849/0053-46",
+  "claseter": "PRAIA GRANDE",
   "id": "...",
   "numero_compromisso": "...",
   "dt_abertura": "2026-06-01 08:00:00",
   "data_primeiro_agendamento": "...",
   "tipo_trabalho": "Manutenção",
+  "inicio_servico": "2026-06-01 09:00:00",
   "termino_servico": "2026-06-01 10:00:00",
   "status": "Concluída"
 }
@@ -97,7 +99,7 @@ Normalizacao de `status`:
 
 `GET /api/v1/moavi/agendamentos/proximos-15-dias?page_size=500`
 
-Usa `America/Sao_Paulo` e retorna de hoje ate hoje + 15 dias.
+Usa `America/Sao_Paulo` e retorna de hoje ate hoje + 15 dias com os mesmos campos do item acima.
 
 ## Alteracoes
 
@@ -116,5 +118,7 @@ Retorna somente:
 - `created`: novo registro na janela
 - `updated`: registro existente com hash diferente
 - `removed`: registro removido da janela ou apagado da fonte
+
+As alteracoes `created` e `updated` retornam o objeto `item` com os mesmos campos do item acima, incluindo `inicio_servico`, `termino_servico` e `claseter`.
 
 Quando `pagination.has_more` for `false`, grave o `next_sync_key` para a proxima sincronizacao.

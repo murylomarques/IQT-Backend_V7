@@ -118,6 +118,9 @@ components:
       properties:
         cnpj_empresa:
           type: string
+        claseter:
+          type: string
+          const: PRAIA GRANDE
         id:
           type: string
         numero_compromisso:
@@ -129,6 +132,9 @@ components:
           type: string
           nullable: true
         tipo_trabalho:
+          type: string
+          nullable: true
+        inicio_servico:
           type: string
           nullable: true
         termino_servico:
