@@ -11,6 +11,7 @@ class FcaUserImport extends Model
         'uploaded_by',
         'source_filename',
         'rows_count',
+        'is_active',
     ];
 
     public function rows()

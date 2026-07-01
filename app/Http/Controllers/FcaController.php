@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use App\Models\FcaUser;
 use App\Models\FcaUserImport;
 use App\Models\FcaUserImportRow;
@@ -30,6 +31,10 @@ class FcaController extends Controller
 
         if (!$user || !Hash::check($request->password, $user->password)) {
             return response()->json(['error' => 'Usuário ou senha inválidos.'], 401);
+        }
+
+        if (!$this->isPrivilegedRole($user->role) && !$this->userBelongsToVisibleBase($user->id)) {
+            return response()->json(['error' => 'Usuario fora da base vigente do mes.'], 403);
         }
 
         $token = hash('sha256', uniqid(rand(), true));
@@ -61,7 +66,7 @@ class FcaController extends Controller
     {
         $user = $request->attributes->get('fca_user');
 
-        $allUsers = FcaUser::all();
+        $allUsers = $this->activeBaseUsersQuery()->get();
 
         $metrics = [
             'total'          => $allUsers->count(),
@@ -78,13 +83,14 @@ class FcaController extends Controller
         $visibleUsers = match ($user->role) {
             'admin', 'consulta' => $allUsers,
 
-            'coordenacao' => FcaUser::where('manager_id', $user->id)->get()
-                ->concat(FcaUser::whereIn('manager_id', FcaUser::where('manager_id', $user->id)->pluck('id'))->get())
-                ->concat(FcaUser::where('role', 'supervisao')->whereNull('manager_id')->get())
+            'coordenacao' => $this->activeBaseUsersQuery(false)->where('manager_id', $user->id)->get()
+                ->concat($this->activeBaseUsersQuery(false)->whereIn('manager_id', $this->activeBaseUsersQuery(false)->where('manager_id', $user->id)->pluck('id'))->get())
+                ->concat($this->activeBaseUsersQuery(false)->where('role', 'supervisao')->whereNull('manager_id')->get())
                 ->unique('id'),
 
-            'supervisao' => FcaUser::where('manager_id', $user->id)
-                ->orWhere(fn($q) => $q->where('role', 'tecnico')->whereNull('manager_id'))
+            'supervisao' => $this->activeBaseUsersQuery(false)
+                ->where(fn($q) => $q->where('manager_id', $user->id)
+                    ->orWhere(fn($qq) => $qq->where('role', 'tecnico')->whereNull('manager_id')))
                 ->get(),
 
             default => collect([$user]),
@@ -152,7 +158,8 @@ class FcaController extends Controller
 
     public function indexUsers(Request $request)
     {
-        $users = FcaUser::with('manager:id,name')
+        $users = $this->activeBaseUsersQuery()
+            ->with('manager:id,name')
             ->orderBy('name')
             ->get()
             ->map(fn($u) => $this->formatUser($u));
@@ -402,6 +409,7 @@ class FcaController extends Controller
         $import = null;
         if (count($snapshotSources) > 0) {
             try {
+                $this->resetOperationalLinks();
                 $import = $this->storeImportSnapshot($request, $snapshotSources);
             } catch (\Throwable $e) {
                 $errors[] = 'snapshot: ' . $e->getMessage();
@@ -462,7 +470,8 @@ class FcaController extends Controller
             ]);
         }
 
-        $users = FcaUser::with('manager.manager.manager')
+        $users = $this->activeBaseUsersQuery()
+            ->with('manager.manager.manager')
             ->orderBy('name')
             ->get();
 
@@ -480,6 +489,93 @@ class FcaController extends Controller
     // Helpers
     // -------------------------------------------------------------------------
 
+    private function activeBaseUsersQuery(bool $includePrivileged = true)
+    {
+        return $this->applyActiveBaseScope(FcaUser::query(), $includePrivileged);
+    }
+
+    private function applyActiveBaseScope($query, bool $includePrivileged = true)
+    {
+        $ids = $this->visibleBaseUserIds();
+
+        if ($ids !== null) {
+            $query->where(function ($q) use ($ids, $includePrivileged) {
+                $q->whereIn('id', $ids);
+
+                if ($includePrivileged) {
+                    $q->orWhereIn('role', ['admin', 'consulta']);
+                }
+            });
+        }
+
+        return $query;
+    }
+
+    private function visibleBaseUserIds(): ?array
+    {
+        $import = $this->activeImport();
+
+        if (!$import) {
+            return null;
+        }
+
+        if (!$this->importMatchesCurrentMonth($import)) {
+            return [];
+        }
+
+        return FcaUserImportRow::where('fca_user_import_id', $import->id)
+            ->whereNotNull('fca_user_id')
+            ->pluck('fca_user_id')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function activeImport(): ?FcaUserImport
+    {
+        if (!Schema::hasTable('fca_user_imports')) {
+            return null;
+        }
+
+        $query = FcaUserImport::query();
+
+        if ($this->importActiveColumnExists()) {
+            $query->where('is_active', true);
+        }
+
+        return $query->latest()->first() ?: FcaUserImport::latest()->first();
+    }
+
+    private function importActiveColumnExists(): bool
+    {
+        return Schema::hasTable('fca_user_imports') && Schema::hasColumn('fca_user_imports', 'is_active');
+    }
+
+    private function importMatchesCurrentMonth(FcaUserImport $import): bool
+    {
+        $label = $this->monthLabelFromValue((string) $import->label) ?? trim((string) $import->label);
+
+        return $label === now()->format('m/Y');
+    }
+
+    private function isPrivilegedRole(?string $role): bool
+    {
+        return in_array($role, ['admin', 'consulta'], true);
+    }
+
+    private function userBelongsToVisibleBase(int $userId): bool
+    {
+        $ids = $this->visibleBaseUserIds();
+
+        return $ids === null || in_array($userId, $ids, true);
+    }
+
+    private function resetOperationalLinks(): void
+    {
+        FcaUser::whereIn('role', ['tecnico', 'supervisao', 'coordenacao'])
+            ->update(['manager_id' => null]);
+    }
+
     private function storeImportSnapshot(Request $request, array $snapshotSources): FcaUserImport
     {
         $actor = $request->attributes->get('fca_user');
@@ -488,12 +584,22 @@ class FcaController extends Controller
             $label = $this->inferImportLabel($snapshotSources) ?? now()->format('m/Y');
         }
 
-        $import = FcaUserImport::create([
+        if ($this->importActiveColumnExists()) {
+            FcaUserImport::where('is_active', true)->update(['is_active' => false]);
+        }
+
+        $importData = [
             'label' => $label,
             'uploaded_by' => $actor?->id,
             'source_filename' => $request->file('file')?->getClientOriginalName(),
             'rows_count' => 0,
-        ]);
+        ];
+
+        if ($this->importActiveColumnExists()) {
+            $importData['is_active'] = true;
+        }
+
+        $import = FcaUserImport::create($importData);
 
         $employeeIds = collect($snapshotSources)
             ->map(fn($source) => $source['payload']['employee_id'] ?? null)
@@ -576,6 +682,7 @@ class FcaController extends Controller
             'rows_count' => $import->rows_count,
             'uploaded_by' => $import->uploaded_by,
             'uploaded_by_name' => $import->relationLoaded('uploader') ? ($import->uploader->name ?? null) : null,
+            'is_active' => (bool) ($import->is_active ?? false),
             'created_at' => $import->created_at?->toIso8601String(),
         ];
     }

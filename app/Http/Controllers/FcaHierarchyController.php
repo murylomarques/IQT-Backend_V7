@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use App\Models\FcaUser;
+use App\Models\FcaUserImport;
+use App\Models\FcaUserImportRow;
 use App\Models\FcaLinkRequest;
 use App\Models\FcaMonthlyWindowConfig;
 
@@ -17,8 +20,9 @@ class FcaHierarchyController extends Controller
     {
         $user = $request->attributes->get('fca_user');
 
-        $direct = FcaUser::where('manager_id', $user->id)
-            ->with('subordinates')
+        $direct = $this->activeBaseUsersQuery(false)
+            ->where('manager_id', $user->id)
+            ->with(['subordinates' => fn($q) => $this->applyActiveBaseScope($q, false)])
             ->get();
 
         return response()->json([
@@ -28,7 +32,13 @@ class FcaHierarchyController extends Controller
 
     public function getAllHierarchy(Request $request)
     {
-        $roots = FcaUser::whereNull('manager_id')->with('subordinates.subordinates')->get();
+        $roots = $this->activeBaseUsersQuery(false)
+            ->whereNull('manager_id')
+            ->with(['subordinates' => function ($q) {
+                $this->applyActiveBaseScope($q, false)
+                    ->with(['subordinates' => fn($qq) => $this->applyActiveBaseScope($qq, false)]);
+            }])
+            ->get();
         return response()->json($roots->map(fn($u) => $this->formatWithDepth($u, 0)));
     }
 
@@ -51,6 +61,10 @@ class FcaHierarchyController extends Controller
 
         $parent = FcaUser::findOrFail($request->parent_id);
         $child  = FcaUser::findOrFail($request->child_id);
+
+        if (!$this->userCanUseBase($parent) || !$this->userCanUseBase($child)) {
+            return response()->json(['error' => 'Usuario fora da base vigente do mes.'], 422);
+        }
 
         // Role compatibility check
         $allowed = [
@@ -130,6 +144,10 @@ class FcaHierarchyController extends Controller
 
         $parent = FcaUser::findOrFail($request->parent_id);
 
+        if (!$this->userCanUseBase($parent)) {
+            return response()->json(['error' => 'Usuario fora da base vigente do mes.'], 422);
+        }
+
         if ($actor->role !== 'admin' && (int) $actor->id !== (int) $parent->id) {
             return response()->json(['error' => 'Você só pode criar vínculos como superior direto.'], 403);
         }
@@ -149,6 +167,8 @@ class FcaHierarchyController extends Controller
             if ((int) $childId === (int) $parent->id) { $failed++; continue; }
             $child = $children->get($childId);
             if (!$child) { $failed++; continue; }
+
+            if (!$this->userCanUseBase($child)) { $failed++; continue; }
 
             if (!isset($allowed[$parent->role]) || !in_array($child->role, $allowed[$parent->role])) {
                 $failed++; continue;
@@ -233,7 +253,13 @@ class FcaHierarchyController extends Controller
             return response()->json(['error' => 'Esta solicitação já foi processada.'], 422);
         }
 
+        $parent = FcaUser::findOrFail($linkReq->parent_user_id);
         $child = FcaUser::findOrFail($linkReq->child_user_id);
+
+        if (!$this->userCanUseBase($parent) || !$this->userCanUseBase($child)) {
+            return response()->json(['error' => 'Usuario fora da base vigente do mes.'], 422);
+        }
+
         $child->manager_id = $linkReq->parent_user_id;
         $child->save();
 
@@ -270,6 +296,128 @@ class FcaHierarchyController extends Controller
     // Helpers
     // -------------------------------------------------------------------------
 
+    private function activeBaseUsersQuery(bool $includePrivileged = true)
+    {
+        return $this->applyActiveBaseScope(FcaUser::query(), $includePrivileged);
+    }
+
+    private function applyActiveBaseScope($query, bool $includePrivileged = true)
+    {
+        $ids = $this->visibleBaseUserIds();
+
+        if ($ids !== null) {
+            $query->where(function ($q) use ($ids, $includePrivileged) {
+                $q->whereIn('id', $ids);
+
+                if ($includePrivileged) {
+                    $q->orWhereIn('role', ['admin', 'consulta']);
+                }
+            });
+        }
+
+        return $query;
+    }
+
+    private function visibleBaseUserIds(): ?array
+    {
+        $import = $this->activeImport();
+
+        if (!$import) {
+            return null;
+        }
+
+        if (!$this->importMatchesCurrentMonth($import)) {
+            return [];
+        }
+
+        return FcaUserImportRow::where('fca_user_import_id', $import->id)
+            ->whereNotNull('fca_user_id')
+            ->pluck('fca_user_id')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function activeImport(): ?FcaUserImport
+    {
+        if (!Schema::hasTable('fca_user_imports')) {
+            return null;
+        }
+
+        $query = FcaUserImport::query();
+
+        if ($this->importActiveColumnExists()) {
+            $query->where('is_active', true);
+        }
+
+        return $query->latest()->first() ?: FcaUserImport::latest()->first();
+    }
+
+    private function importActiveColumnExists(): bool
+    {
+        return Schema::hasTable('fca_user_imports') && Schema::hasColumn('fca_user_imports', 'is_active');
+    }
+
+    private function importMatchesCurrentMonth(FcaUserImport $import): bool
+    {
+        $label = $this->monthLabelFromValue((string) $import->label) ?? trim((string) $import->label);
+
+        return $label === now()->format('m/Y');
+    }
+
+    private function monthLabelFromValue(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') return null;
+
+        if (preg_match('/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/', $value, $m)) {
+            $year = (int) $m[3];
+            if ($year < 100) $year += 2000;
+            $month = (int) $m[2];
+            if ($month >= 1 && $month <= 12) return sprintf('%02d/%04d', $month, $year);
+        }
+
+        if (preg_match('/\b(\d{1,2})[\/\-](\d{2,4})\b/', $value, $m)) {
+            $year = (int) $m[2];
+            if ($year < 100) $year += 2000;
+            $month = (int) $m[1];
+            if ($month >= 1 && $month <= 12) return sprintf('%02d/%04d', $month, $year);
+        }
+
+        $months = [
+            'jan' => 1, 'fev' => 2, 'mar' => 3, 'abr' => 4,
+            'mai' => 5, 'jun' => 6, 'jul' => 7, 'ago' => 8,
+            'set' => 9, 'out' => 10, 'nov' => 11, 'dez' => 12,
+        ];
+        if (preg_match('/\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*[\/\- ]?(\d{2,4})\b/i', $value, $m)) {
+            $year = (int) $m[2];
+            if ($year < 100) $year += 2000;
+            return sprintf('%02d/%04d', $months[strtolower(substr($m[1], 0, 3))], $year);
+        }
+
+        try {
+            return \Carbon\Carbon::parse($value)->format('m/Y');
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function isPrivilegedRole(?string $role): bool
+    {
+        return in_array($role, ['admin', 'consulta'], true);
+    }
+
+    private function userCanUseBase(FcaUser $user): bool
+    {
+        if ($this->isPrivilegedRole($user->role)) {
+            return true;
+        }
+
+        $ids = $this->visibleBaseUserIds();
+
+        return $ids === null || in_array($user->id, $ids, true);
+    }
+
     private function isWindowOpen(): bool
     {
         $config  = FcaMonthlyWindowConfig::first();
@@ -281,8 +429,12 @@ class FcaHierarchyController extends Controller
 
     public function fullTree(Request $request)
     {
-        $coordenadores = FcaUser::where('role', 'coordenacao')
-            ->with(['subordinates' => fn($q) => $q->with('subordinates')])
+        $coordenadores = $this->activeBaseUsersQuery(false)
+            ->where('role', 'coordenacao')
+            ->with(['subordinates' => function ($q) {
+                $this->applyActiveBaseScope($q, false)
+                    ->with(['subordinates' => fn($qq) => $this->applyActiveBaseScope($qq, false)]);
+            }])
             ->orderBy('name')
             ->get();
 
