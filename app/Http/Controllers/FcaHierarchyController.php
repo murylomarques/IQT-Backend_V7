@@ -196,20 +196,16 @@ class FcaHierarchyController extends Controller
     {
         $actor = $request->attributes->get('fca_user');
 
-        if ($actor->role === 'consulta') {
-            return response()->json(['error' => 'Perfil de consulta permite apenas visualizacao.'], 403);
+        if ($actor->role !== 'admin') {
+            return response()->json(['error' => 'Somente administrador pode remover vinculos.'], 403);
         }
 
         $child = FcaUser::findOrFail($childId);
 
-        if ($actor->role !== 'admin' && (int) $actor->id !== (int) $child->manager_id) {
-            return response()->json(['error' => 'Não autorizado para desvincular este usuário.'], 403);
-        }
-
         $child->manager_id = null;
         $child->save();
 
-        return response()->json(['message' => 'Vínculo removido.']);
+        return response()->json(['message' => 'Vinculo removido.']);
     }
 
     // -------------------------------------------------------------------------

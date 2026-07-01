@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use App\Models\FcaUser;
+use App\Models\FcaUserImport;
+use App\Models\FcaUserImportRow;
 use App\Models\FcaLinkRequest;
 use App\Models\FcaMonthlyWindowConfig;
 
@@ -285,10 +287,13 @@ class FcaController extends Controller
 
         $toInsert = [];   // novos usuários
         $toUpdate = [];   // [id => payload]
+        $snapshotSources = [];
         $errors   = [];
         $now      = now()->toDateTimeString();
+        $rowNumber = 1;
 
         while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
+            $rowNumber++;
             if (count($row) < $numHeaders) continue;
 
             $raw = array_combine($headers, array_map('trim', array_slice($row, 0, $numHeaders)));
@@ -296,11 +301,11 @@ class FcaController extends Controller
 
             try {
                 $matricula  = $raw['matricula']   ?? $raw['usuario']    ?? '';
-                $nome       = $raw['colaborador']  ?? $raw['nome']      ?? $raw['name'] ?? '';
+                $nome       = $this->firstRawValue($raw, ['colaborador', 'nome', 'name', 'tecnico', 'supervisor', 'coordenador', 'gerente']) ?? '';
                 $cpfRaw     = trim($raw['cpf']     ?? '');
                 $cpf        = $cpfRaw !== '' ? $cpfRaw : null;
                 $senhaCpf   = preg_replace('/\D/', '', $cpfRaw);
-                $cargo      = $raw['cargo']        ?? $raw['title']     ?? $raw['role'] ?? '';
+                $cargo      = $this->firstRawValue($raw, ['cargo', 'title', 'role']) ?? '';
                 $email      = (!empty($raw['email'])) ? trim($raw['email']) : null;
                 $territorio = (!empty($raw['territorio'])) ? $raw['territorio'] : ((!empty($raw['territory'])) ? $raw['territory'] : null);
                 $regional   = (!empty($raw['regional'])) ? $raw['regional'] : null;
@@ -315,6 +320,8 @@ class FcaController extends Controller
                 $existingId = ($empId ? ($byEmpId[$empId] ?? null) : null)
                            ?? ($usuario ? ($byUsuario[$usuario] ?? null) : null);
 
+                if ($existingId === -1) continue;
+
                 $payload = [
                     'name'        => $nome,
                     'usuario'     => $usuario,
@@ -326,6 +333,16 @@ class FcaController extends Controller
                     'territory'   => $territorio,
                     'regional'    => $regional,
                     'title'       => ($cargo !== '') ? $cargo : null,
+                ];
+
+                if (array_key_exists('observacao', $raw)) {
+                    $payload['observacao'] = trim((string) $raw['observacao']) !== '' ? trim((string) $raw['observacao']) : null;
+                }
+
+                $snapshotSources[] = [
+                    'source_row' => $rowNumber,
+                    'raw' => $raw,
+                    'payload' => $payload,
                 ];
 
                 if ($existingId) {
@@ -382,10 +399,20 @@ class FcaController extends Controller
             }
         }
 
+        $import = null;
+        if (count($snapshotSources) > 0) {
+            try {
+                $import = $this->storeImportSnapshot($request, $snapshotSources);
+            } catch (\Throwable $e) {
+                $errors[] = 'snapshot: ' . $e->getMessage();
+            }
+        }
+
         return response()->json([
             'message' => "Importação concluída. Criados: {$created}, Atualizados: {$updated}." . (count($errors) ? " Erros: " . count($errors) . "." : ''),
             'created' => $created,
             'updated' => $updated,
+            'import'  => $import ? $this->formatImport($import) : null,
             'errors'  => $errors,
         ]);
     }
@@ -400,39 +427,47 @@ class FcaController extends Controller
         return response()->json(['message' => "Base limpa. {$deleted} usuário(s) removido(s)."]);
     }
 
+    public function importHistory(Request $request)
+    {
+        return response()->json(
+            FcaUserImport::with('uploader:id,name')
+                ->latest()
+                ->take(36)
+                ->get()
+                ->map(fn($import) => $this->formatImport($import))
+                ->values()
+        );
+    }
+
     public function exportCsv(Request $request)
     {
-        $users = FcaUser::with('manager:id,name,email,role')
+        $lines = [];
+        $lines[] = $this->csvLine($this->ghExportHeaders());
+
+        if ($request->filled('import_id')) {
+            $import = FcaUserImport::findOrFail($request->query('import_id'));
+
+            FcaUserImportRow::where('fca_user_import_id', $import->id)
+                ->orderBy('source_row')
+                ->orderBy('id')
+                ->chunk(500, function ($rows) use (&$lines) {
+                    foreach ($rows as $row) {
+                        $lines[] = $this->csvLine($this->snapshotExportRow($row));
+                    }
+                });
+
+            return response(implode("\n", $lines), 200, [
+                'Content-Type'        => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="usuarios_gh_hierarquia_periodo_' . $import->id . '_' . now()->format('Ymd') . '.csv"',
+            ]);
+        }
+
+        $users = FcaUser::with('manager.manager.manager')
             ->orderBy('name')
             ->get();
 
-        $lines   = [];
-        $lines[] = $this->csvLine([
-            'id',
-            'name',
-            'email',
-            'role',
-            'manager_id',
-            'supervisor_id',
-            'supervisor_name',
-            'supervisor_email',
-            'supervisor_role',
-        ]);
-
         foreach ($users as $u) {
-            $supervisor = $u->manager;
-
-            $lines[] = $this->csvLine([
-                $u->id,
-                $u->name,
-                $u->email ?? '',
-                $u->role,
-                $u->manager_id ?? '',
-                $supervisor?->id ?? '',
-                $supervisor?->name ?? '',
-                $supervisor?->email ?? '',
-                $supervisor?->role ?? '',
-            ]);
+            $lines[] = $this->csvLine($this->currentExportRow($u));
         }
 
         return response(implode("\n", $lines), 200, [
@@ -445,38 +480,239 @@ class FcaController extends Controller
     // Helpers
     // -------------------------------------------------------------------------
 
+    private function storeImportSnapshot(Request $request, array $snapshotSources): FcaUserImport
+    {
+        $actor = $request->attributes->get('fca_user');
+        $label = trim((string) $request->input('label', ''));
+        if ($label === '') {
+            $label = now()->format('m/Y');
+        }
+
+        $import = FcaUserImport::create([
+            'label' => $label,
+            'uploaded_by' => $actor?->id,
+            'source_filename' => $request->file('file')?->getClientOriginalName(),
+            'rows_count' => 0,
+        ]);
+
+        $employeeIds = collect($snapshotSources)
+            ->map(fn($source) => $source['payload']['employee_id'] ?? null)
+            ->filter()
+            ->unique()
+            ->values();
+        $usuarios = collect($snapshotSources)
+            ->map(fn($source) => $source['payload']['usuario'] ?? null)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $usersByEmpId = FcaUser::with('manager.manager.manager')
+            ->whereIn('employee_id', $employeeIds)
+            ->get()
+            ->keyBy('employee_id');
+        $usersByUsuario = FcaUser::with('manager.manager.manager')
+            ->whereIn('usuario', $usuarios)
+            ->get()
+            ->keyBy('usuario');
+
+        $rows = [];
+        $now = now()->toDateTimeString();
+
+        foreach ($snapshotSources as $source) {
+            $payload = $source['payload'];
+            $raw = $source['raw'];
+            $user = ($payload['employee_id'] ?? null) ? $usersByEmpId->get($payload['employee_id']) : null;
+            $user = $user ?: (($payload['usuario'] ?? null) ? $usersByUsuario->get($payload['usuario']) : null);
+            $hierarchy = $user ? $this->resolveHierarchyColumns($user) : [
+                'tecnico' => '',
+                'supervisor' => '',
+                'coordenador' => '',
+                'gerente' => '',
+                'hierarquia_completa' => '',
+            ];
+
+            $rows[] = [
+                'fca_user_import_id' => $import->id,
+                'fca_user_id' => $user?->id,
+                'source_row' => $source['source_row'] ?? null,
+                'name' => $payload['name'] ?? $user?->name,
+                'usuario' => $payload['usuario'] ?? $user?->usuario,
+                'email' => $payload['email'] ?? $user?->email,
+                'role' => $payload['role'] ?? $user?->role,
+                'employee_id' => $payload['employee_id'] ?? $user?->employee_id,
+                'cpf' => $payload['cpf'] ?? $user?->cpf,
+                'empresa' => $payload['empresa'] ?? $user?->empresa,
+                'territory' => $payload['territory'] ?? $user?->territory,
+                'regional' => $payload['regional'] ?? $user?->regional,
+                'title' => $payload['title'] ?? $user?->title,
+                'tecnico' => $this->firstRawValue($raw, ['tecnico']) ?? $hierarchy['tecnico'],
+                'supervisor' => $this->firstRawValue($raw, ['supervisor']) ?? $hierarchy['supervisor'],
+                'coordenador' => $this->firstRawValue($raw, ['coordenador']) ?? $hierarchy['coordenador'],
+                'gerente' => $this->firstRawValue($raw, ['gerente']) ?? $hierarchy['gerente'],
+                'hierarquia_completa' => $this->firstRawValue($raw, ['hierarquia_completa']) ?? $hierarchy['hierarquia_completa'],
+                'usuario_created_at' => $this->firstRawValue($raw, ['created_at']) ?? $this->formatExportDate($user?->created_at),
+                'observacao' => array_key_exists('observacao', $payload) ? $payload['observacao'] : ($user?->observacao),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            FcaUserImportRow::insert($chunk);
+        }
+
+        $import->rows_count = count($rows);
+        $import->save();
+
+        return $import->fresh('uploader:id,name');
+    }
+
+    private function formatImport(FcaUserImport $import): array
+    {
+        return [
+            'id' => $import->id,
+            'label' => $import->label,
+            'source_filename' => $import->source_filename,
+            'rows_count' => $import->rows_count,
+            'uploaded_by' => $import->uploaded_by,
+            'uploaded_by_name' => $import->relationLoaded('uploader') ? ($import->uploader->name ?? null) : null,
+            'created_at' => $import->created_at?->toIso8601String(),
+        ];
+    }
+
+    private function ghExportHeaders(): array
+    {
+        return [
+            'id',
+            'usuario',
+            'email',
+            'role',
+            'employee_id',
+            'cpf',
+            'territory',
+            'regional',
+            'title',
+            'tecnico',
+            'supervisor',
+            'coordenador',
+            'GERENTE',
+            'hierarquia_completa',
+            'created_at',
+            'observacao',
+        ];
+    }
+
+    private function currentExportRow(FcaUser $user): array
+    {
+        $hierarchy = $this->resolveHierarchyColumns($user);
+
+        return [
+            $user->id,
+            $user->usuario ?? '',
+            $user->email ?? '',
+            $user->role ?? '',
+            $user->employee_id ?? '',
+            $user->cpf ?? '',
+            $user->territory ?? '',
+            $user->regional ?? '',
+            $user->title ?? '',
+            $hierarchy['tecnico'],
+            $hierarchy['supervisor'],
+            $hierarchy['coordenador'],
+            $hierarchy['gerente'],
+            $hierarchy['hierarquia_completa'],
+            $this->formatExportDate($user->created_at),
+            $user->observacao ?? '',
+        ];
+    }
+
+    private function snapshotExportRow(FcaUserImportRow $row): array
+    {
+        return [
+            $row->fca_user_id ?? '',
+            $row->usuario ?? '',
+            $row->email ?? '',
+            $row->role ?? '',
+            $row->employee_id ?? '',
+            $row->cpf ?? '',
+            $row->territory ?? '',
+            $row->regional ?? '',
+            $row->title ?? '',
+            $row->tecnico ?? '',
+            $row->supervisor ?? '',
+            $row->coordenador ?? '',
+            $row->gerente ?? '',
+            $row->hierarquia_completa ?? '',
+            $row->usuario_created_at ?? '',
+            $row->observacao ?? '',
+        ];
+    }
+
+    private function formatExportDate($value): string
+    {
+        if (!$value) return '';
+
+        try {
+            return $value instanceof \DateTimeInterface
+                ? $value->format('d/m/Y')
+                : \Carbon\Carbon::parse($value)->format('d/m/Y');
+        } catch (\Throwable $e) {
+            return (string) $value;
+        }
+    }
+
+    private function firstRawValue(array $raw, array $keys): ?string
+    {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $raw) && trim((string) $raw[$key]) !== '') {
+                return trim((string) $raw[$key]);
+            }
+        }
+
+        return null;
+    }
+
     private function resolveHierarchyColumns(FcaUser $user): array
     {
         $tecnico = '';
         $supervisor = '';
         $coordenador = '';
+        $gerente = '';
         $hierarquiaCompleta = '';
 
         if ($user->role === 'tecnico') {
             $tecnico = $user->name;
             $manager = $user->manager;
+            $coordinatorUser = null;
 
             if ($manager?->role === 'supervisao') {
                 $supervisor = $manager->name;
 
                 if ($manager->manager?->role === 'coordenacao') {
-                    $coordenador = $manager->manager->name;
+                    $coordinatorUser = $manager->manager;
+                    $coordenador = $coordinatorUser->name;
                 }
             } elseif ($manager?->role === 'coordenacao') {
+                $coordinatorUser = $manager;
                 $coordenador = $manager->name;
             }
 
+            $gerente = $coordinatorUser?->manager?->name ?? '';
             $hierarquiaCompleta = ($tecnico && $supervisor && $coordenador) ? 'Sim' : 'Nao';
         } elseif ($user->role === 'supervisao') {
             $supervisor = $user->name;
+            $coordinatorUser = null;
 
             if ($user->manager?->role === 'coordenacao') {
-                $coordenador = $user->manager->name;
+                $coordinatorUser = $user->manager;
+                $coordenador = $coordinatorUser->name;
             }
 
+            $gerente = $coordinatorUser?->manager?->name ?? '';
             $hierarquiaCompleta = ($supervisor && $coordenador) ? 'Sim' : 'Nao';
         } elseif ($user->role === 'coordenacao') {
             $coordenador = $user->name;
+            $gerente = $user->manager?->name ?? '';
             $hierarquiaCompleta = 'Sim';
         }
 
@@ -484,6 +720,7 @@ class FcaController extends Controller
             'tecnico' => $tecnico,
             'supervisor' => $supervisor,
             'coordenador' => $coordenador,
+            'gerente' => $gerente,
             'hierarquia_completa' => $hierarquiaCompleta,
         ];
     }
@@ -491,7 +728,7 @@ class FcaController extends Controller
     private function csvLine(array $fields): string
     {
         $handle = fopen('php://temp', 'r+');
-        fputcsv($handle, $fields, ',', '"', '');
+        fputcsv($handle, $fields, ';', '"', '');
         rewind($handle);
         $line = rtrim(stream_get_contents($handle), "\r\n");
         fclose($handle);
@@ -555,6 +792,15 @@ class FcaController extends Controller
             'Ó'=>'o','Õ'=>'o','Ô'=>'o',
             'Ú'=>'u','Ç'=>'c','Ñ'=>'n',
         ];
-        return strtolower(strtr($h, $map));
+        $h = strtr($h, $map);
+        $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $h);
+        if ($ascii !== false) {
+            $h = $ascii;
+        }
+
+        $h = strtolower(trim($h));
+        $h = preg_replace('/[^a-z0-9]+/', '_', $h);
+
+        return trim($h, '_');
     }
 }
