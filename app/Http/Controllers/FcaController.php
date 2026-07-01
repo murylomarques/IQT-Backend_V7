@@ -485,7 +485,7 @@ class FcaController extends Controller
         $actor = $request->attributes->get('fca_user');
         $label = trim((string) $request->input('label', ''));
         if ($label === '') {
-            $label = now()->format('m/Y');
+            $label = $this->inferImportLabel($snapshotSources) ?? now()->format('m/Y');
         }
 
         $import = FcaUserImport::create([
@@ -670,6 +670,57 @@ class FcaController extends Controller
         }
 
         return null;
+    }
+
+    private function inferImportLabel(array $snapshotSources): ?string
+    {
+        foreach ($snapshotSources as $source) {
+            $raw = $source['raw'] ?? [];
+            if (!is_array($raw)) continue;
+
+            $value = $this->firstRawValue($raw, ['competencia', 'mes', 'periodo', 'data_base', 'created_at']);
+            $label = $this->monthLabelFromValue($value);
+            if ($label) return $label;
+        }
+
+        return null;
+    }
+
+    private function monthLabelFromValue(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') return null;
+
+        if (preg_match('/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/', $value, $m)) {
+            $year = (int) $m[3];
+            if ($year < 100) $year += 2000;
+            $month = (int) $m[2];
+            if ($month >= 1 && $month <= 12) return sprintf('%02d/%04d', $month, $year);
+        }
+
+        if (preg_match('/\b(\d{1,2})[\/\-](\d{2,4})\b/', $value, $m)) {
+            $year = (int) $m[2];
+            if ($year < 100) $year += 2000;
+            $month = (int) $m[1];
+            if ($month >= 1 && $month <= 12) return sprintf('%02d/%04d', $month, $year);
+        }
+
+        $months = [
+            'jan' => 1, 'fev' => 2, 'mar' => 3, 'abr' => 4,
+            'mai' => 5, 'jun' => 6, 'jul' => 7, 'ago' => 8,
+            'set' => 9, 'out' => 10, 'nov' => 11, 'dez' => 12,
+        ];
+        if (preg_match('/\b(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-z]*[\/\- ]?(\d{2,4})\b/i', $value, $m)) {
+            $year = (int) $m[2];
+            if ($year < 100) $year += 2000;
+            return sprintf('%02d/%04d', $months[strtolower(substr($m[1], 0, 3))], $year);
+        }
+
+        try {
+            return \Carbon\Carbon::parse($value)->format('m/Y');
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function resolveHierarchyColumns(FcaUser $user): array
