@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AtendimentoController;
 use App\Http\Controllers\Api\LocationController;
 use App\Http\Controllers\Api\HomeController;
 use App\Http\Controllers\Api\MoaviController;
+use App\Http\Controllers\Api\TspController;
 use App\Http\Controllers\VistoriaController;
 
 use App\Http\Controllers\UserController;
@@ -44,6 +45,21 @@ Route::middleware('api')->group(function () {
 
         Route::post('/agendamentos/alteracoes', [MoaviController::class, 'changes'])
             ->middleware(['moavi.auth:moavi:changes', 'throttle:moavi-api']);
+    });
+
+    Route::prefix('v1/tsp')->group(function () {
+        Route::post('/auth/token', [TspController::class, 'token'])->middleware('throttle:tsp-token');
+
+        Route::middleware(['tsp.auth:tsp:read', 'throttle:tsp-api'])->group(function () {
+            Route::get('/agendamentos/proximos-15-dias', [TspController::class, 'next15Days']);
+        });
+
+        Route::middleware(['tsp.auth:tsp:write', 'throttle:tsp-api'])->group(function () {
+            Route::post('/agendamentos/{id}/fixar', [TspController::class, 'fixar']);
+            Route::post('/agendamentos/{id}/mudar-tecnico', [TspController::class, 'mudarTecnico']);
+            Route::post('/agendamentos/{id}/mudar-horario', [TspController::class, 'mudarHorario']);
+            Route::post('/agendamentos/{id}/suspender', [TspController::class, 'suspender']);
+        });
     });
 
     // Login (publico)

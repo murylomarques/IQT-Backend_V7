@@ -71,5 +71,15 @@ class RouteServiceProvider extends ServiceProvider
             return Limit::perMinute(120)->by($bearer ? hash('sha256', $bearer) : $request->ip());
         });
 
+        RateLimiter::for('tsp-token', function (Request $request) {
+            return Limit::perMinute(20)->by($request->ip());
+        });
+
+        RateLimiter::for('tsp-api', function (Request $request) {
+            $bearer = $request->bearerToken();
+
+            return Limit::perMinute(120)->by($bearer ? hash('sha256', $bearer) : $request->ip());
+        });
+
     }
 }
