@@ -205,6 +205,8 @@ class FcaController extends Controller
             'observacao'     => $request->observacao,
         ]);
 
+        $this->syncUserWithActiveImport($user);
+
         return response()->json(['message' => 'Usuário criado.', 'user' => $this->formatUser($user)], 201);
     }
 
@@ -244,6 +246,7 @@ class FcaController extends Controller
         }
 
         $user->update($data);
+        $this->syncUserWithActiveImport($user->fresh());
 
         return response()->json(['message' => 'Usuário atualizado.', 'user' => $this->formatUser($user->fresh())]);
     }
@@ -574,6 +577,64 @@ class FcaController extends Controller
     {
         FcaUser::whereIn('role', ['tecnico', 'supervisao', 'coordenacao'])
             ->update(['manager_id' => null]);
+    }
+
+    private function syncUserWithActiveImport(FcaUser $user): void
+    {
+        if (!Schema::hasTable('fca_user_import_rows')) {
+            return;
+        }
+
+        $import = $this->activeImport();
+
+        if (!$import || !$this->importMatchesCurrentMonth($import)) {
+            return;
+        }
+
+        if ($this->isPrivilegedRole($user->role)) {
+            FcaUserImportRow::where('fca_user_import_id', $import->id)
+                ->where('fca_user_id', $user->id)
+                ->delete();
+            $this->refreshImportRowsCount($import);
+            return;
+        }
+
+        $user = $user->fresh('manager.manager.manager') ?? $user;
+        $hierarchy = $this->resolveHierarchyColumns($user);
+
+        $row = FcaUserImportRow::firstOrNew([
+            'fca_user_import_id' => $import->id,
+            'fca_user_id' => $user->id,
+        ]);
+
+        $row->fill([
+            'name' => $user->name,
+            'usuario' => $user->usuario,
+            'email' => $user->email,
+            'role' => $user->role,
+            'employee_id' => $user->employee_id,
+            'cpf' => $user->cpf,
+            'empresa' => $user->empresa,
+            'territory' => $user->territory,
+            'regional' => $user->regional,
+            'title' => $user->title,
+            'tecnico' => $hierarchy['tecnico'],
+            'supervisor' => $hierarchy['supervisor'],
+            'coordenador' => $hierarchy['coordenador'],
+            'gerente' => $hierarchy['gerente'],
+            'hierarquia_completa' => $hierarchy['hierarquia_completa'],
+            'usuario_created_at' => $this->formatExportDate($user->created_at),
+            'observacao' => $user->observacao,
+        ]);
+        $row->save();
+
+        $this->refreshImportRowsCount($import);
+    }
+
+    private function refreshImportRowsCount(FcaUserImport $import): void
+    {
+        $import->rows_count = FcaUserImportRow::where('fca_user_import_id', $import->id)->count();
+        $import->save();
     }
 
     private function storeImportSnapshot(Request $request, array $snapshotSources): FcaUserImport
