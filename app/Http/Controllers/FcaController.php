@@ -33,10 +33,6 @@ class FcaController extends Controller
             return response()->json(['error' => 'Usuário ou senha inválidos.'], 401);
         }
 
-        if (!$this->isPrivilegedRole($user->role) && !$this->userBelongsToVisibleBase($user->id)) {
-            return response()->json(['error' => 'Usuario fora da base vigente do mes.'], 403);
-        }
-
         $token = hash('sha256', uniqid(rand(), true));
         $user->token = $token;
         $user->save();
@@ -66,7 +62,7 @@ class FcaController extends Controller
     {
         $user = $request->attributes->get('fca_user');
 
-        $allUsers = $this->activeBaseUsersQuery()->get();
+        $allUsers = FcaUser::query()->get();
 
         $metrics = [
             'total'          => $allUsers->count(),
@@ -74,6 +70,7 @@ class FcaController extends Controller
             'tecnico'        => $allUsers->where('role', 'tecnico')->count(),
             'supervisao'     => $allUsers->where('role', 'supervisao')->count(),
             'coordenacao'    => $allUsers->where('role', 'coordenacao')->count(),
+            'gerente'        => $allUsers->where('role', 'gerente')->count(),
             'nao_vinculados' => $allUsers->whereIn('role', ['tecnico', 'supervisao'])->whereNull('manager_id')->count(),
         ];
 
@@ -83,12 +80,16 @@ class FcaController extends Controller
         $visibleUsers = match ($user->role) {
             'admin', 'consulta' => $allUsers,
 
-            'coordenacao' => $this->activeBaseUsersQuery(false)->where('manager_id', $user->id)->get()
-                ->concat($this->activeBaseUsersQuery(false)->whereIn('manager_id', $this->activeBaseUsersQuery(false)->where('manager_id', $user->id)->pluck('id'))->get())
-                ->concat($this->activeBaseUsersQuery(false)->where('role', 'supervisao')->whereNull('manager_id')->get())
+            'gerente' => FcaUser::query()->where('manager_id', $user->id)->get()
+                ->concat(FcaUser::query()->where('role', 'coordenacao')->whereNull('manager_id')->get())
                 ->unique('id'),
 
-            'supervisao' => $this->activeBaseUsersQuery(false)
+            'coordenacao' => FcaUser::query()->where('manager_id', $user->id)->get()
+                ->concat(FcaUser::query()->whereIn('manager_id', FcaUser::query()->where('manager_id', $user->id)->pluck('id'))->get())
+                ->concat(FcaUser::query()->where('role', 'supervisao')->whereNull('manager_id')->get())
+                ->unique('id'),
+
+            'supervisao' => FcaUser::query()
                 ->where(fn($q) => $q->where('manager_id', $user->id)
                     ->orWhere(fn($qq) => $qq->where('role', 'tecnico')->whereNull('manager_id')))
                 ->get(),
@@ -158,7 +159,7 @@ class FcaController extends Controller
 
     public function indexUsers(Request $request)
     {
-        $users = $this->activeBaseUsersQuery()
+        $users = FcaUser::query()
             ->with('manager:id,name')
             ->orderBy('name')
             ->get()
@@ -174,7 +175,7 @@ class FcaController extends Controller
             'usuario'        => 'required|string|unique:fca_users,usuario',
             'email'          => 'nullable|email|unique:fca_users,email',
             'password'       => 'required|string|min:6',
-            'role'           => 'required|in:admin,coordenacao,supervisao,tecnico,consulta',
+            'role'           => 'required|in:admin,coordenacao,supervisao,tecnico,consulta,gerente',
             'employee_id'    => 'nullable|string|max:50',
             'cpf'            => 'nullable|string|max:20',
             'empresa'        => 'nullable|string|max:150',
@@ -221,7 +222,7 @@ class FcaController extends Controller
             'usuario'       => 'sometimes|string|unique:fca_users,usuario,' . $id,
             'email'         => 'sometimes|nullable|email|unique:fca_users,email,' . $id,
             'password'      => 'sometimes|string|min:6',
-            'role'          => 'sometimes|in:admin,coordenacao,supervisao,tecnico,consulta',
+            'role'          => 'sometimes|in:admin,coordenacao,supervisao,tecnico,consulta,gerente',
             'employee_id'   => 'sometimes|nullable|string|max:50',
             'cpf'           => 'sometimes|nullable|string|max:20',
             'empresa'       => 'sometimes|nullable|string|max:150',
@@ -450,6 +451,20 @@ class FcaController extends Controller
         );
     }
 
+    public function importRows(Request $request, $id)
+    {
+        $import = FcaUserImport::findOrFail($id);
+
+        $rows = FcaUserImportRow::where('fca_user_import_id', $import->id)
+            ->orderBy('source_row')
+            ->orderBy('id')
+            ->get()
+            ->map(fn($row) => $this->formatImportRow($row))
+            ->values();
+
+        return response()->json($rows);
+    }
+
     public function exportCsv(Request $request)
     {
         $lines = [];
@@ -467,13 +482,13 @@ class FcaController extends Controller
                     }
                 });
 
-            return response(implode("\n", $lines), 200, [
+            return response("\xEF\xBB\xBF" . implode("\n", $lines), 200, [
                 'Content-Type'        => 'text/csv; charset=UTF-8',
                 'Content-Disposition' => 'attachment; filename="usuarios_gh_hierarquia_periodo_' . $import->id . '_' . now()->format('Ymd') . '.csv"',
             ]);
         }
 
-        $users = $this->activeBaseUsersQuery()
+        $users = FcaUser::query()
             ->with('manager.manager.manager')
             ->orderBy('name')
             ->get();
@@ -482,7 +497,7 @@ class FcaController extends Controller
             $lines[] = $this->csvLine($this->currentExportRow($u));
         }
 
-        return response(implode("\n", $lines), 200, [
+        return response("\xEF\xBB\xBF" . implode("\n", $lines), 200, [
             'Content-Type'        => 'text/csv; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="usuarios_gh_hierarquia_' . now()->format('Ymd') . '.csv"',
         ]);
@@ -491,48 +506,6 @@ class FcaController extends Controller
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
-
-    private function activeBaseUsersQuery(bool $includePrivileged = true)
-    {
-        return $this->applyActiveBaseScope(FcaUser::query(), $includePrivileged);
-    }
-
-    private function applyActiveBaseScope($query, bool $includePrivileged = true)
-    {
-        $ids = $this->visibleBaseUserIds();
-
-        if ($ids !== null) {
-            $query->where(function ($q) use ($ids, $includePrivileged) {
-                $q->whereIn('id', $ids);
-
-                if ($includePrivileged) {
-                    $q->orWhereIn('role', ['admin', 'consulta']);
-                }
-            });
-        }
-
-        return $query;
-    }
-
-    private function visibleBaseUserIds(): ?array
-    {
-        $import = $this->activeImport();
-
-        if (!$import) {
-            return null;
-        }
-
-        if (!$this->importMatchesCurrentMonth($import)) {
-            return [];
-        }
-
-        return FcaUserImportRow::where('fca_user_import_id', $import->id)
-            ->whereNotNull('fca_user_id')
-            ->pluck('fca_user_id')
-            ->unique()
-            ->values()
-            ->all();
-    }
 
     private function activeImport(): ?FcaUserImport
     {
@@ -564,13 +537,6 @@ class FcaController extends Controller
     private function isPrivilegedRole(?string $role): bool
     {
         return in_array($role, ['admin', 'consulta'], true);
-    }
-
-    private function userBelongsToVisibleBase(int $userId): bool
-    {
-        $ids = $this->visibleBaseUserIds();
-
-        return $ids === null || in_array($userId, $ids, true);
     }
 
     private function resetOperationalLinks(): void
@@ -660,7 +626,14 @@ class FcaController extends Controller
             $importData['is_active'] = true;
         }
 
-        $import = FcaUserImport::create($importData);
+        $import = FcaUserImport::where('label', $label)->first();
+
+        if ($import) {
+            FcaUserImportRow::where('fca_user_import_id', $import->id)->delete();
+            $import->update($importData);
+        } else {
+            $import = FcaUserImport::create($importData);
+        }
 
         $employeeIds = collect($snapshotSources)
             ->map(fn($source) => $source['payload']['employee_id'] ?? null)
@@ -763,7 +736,7 @@ class FcaController extends Controller
             'tecnico',
             'supervisor',
             'coordenador',
-            'GERENTE',
+            'gerente',
             'hierarquia_completa',
             'created_at',
             'observacao',
@@ -933,6 +906,9 @@ class FcaController extends Controller
             $coordenador = $user->name;
             $gerente = $user->manager?->name ?? '';
             $hierarquiaCompleta = 'Sim';
+        } elseif ($user->role === 'gerente') {
+            $gerente = $user->name;
+            $hierarquiaCompleta = 'Sim';
         }
 
         return [
@@ -978,10 +954,41 @@ class FcaController extends Controller
         ];
     }
 
+    private function formatImportRow(FcaUserImportRow $row): array
+    {
+        $managerName = match ($row->role) {
+            'tecnico'     => $row->supervisor ?: ($row->coordenador ?: null),
+            'supervisao'  => $row->coordenador ?: null,
+            'coordenacao' => $row->gerente ?: null,
+            default       => null,
+        };
+
+        return [
+            'id'             => $row->fca_user_id ?? "row-{$row->id}",
+            'name'           => $row->name,
+            'usuario'        => $row->usuario,
+            'email'          => $row->email,
+            'role'           => $row->role,
+            'employee_id'    => $row->employee_id,
+            'cpf'            => $row->cpf,
+            'empresa'        => $row->empresa,
+            'territory'      => $row->territory,
+            'regional'       => $row->regional,
+            'title'          => $row->title,
+            'manager_id'     => null,
+            'manager_name'   => $managerName,
+            'data_admissao'  => null,
+            'data_demissao'  => null,
+            'observacao'     => $row->observacao,
+            'created_at'     => $row->usuario_created_at,
+        ];
+    }
+
     private function inferRole(string $raw): string
     {
         $lower = strtolower($raw);
         if (str_contains($lower, 'admin'))       return 'admin';
+        if (str_contains($lower, 'gerente'))     return 'gerente';
         if (str_contains($lower, 'coord'))       return 'coordenacao';
         if (str_contains($lower, 'super'))       return 'supervisao';
         if (str_contains($lower, 'tecn'))        return 'tecnico';

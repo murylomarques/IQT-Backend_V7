@@ -211,6 +211,7 @@ Route::middleware('api')->group(function () {
         // Rotas fixas devem vir ANTES das rotas com {id}
         Route::post('/fca/users/import-csv', [FcaController::class, 'importCsv'])->middleware('fca.admin');
         Route::get('/fca/users/imports', [FcaController::class, 'importHistory'])->middleware('fca.admin');
+        Route::get('/fca/users/imports/{id}/rows', [FcaController::class, 'importRows'])->middleware('fca.admin_or_consulta');
         Route::get('/fca/users/export-csv', [FcaController::class, 'exportCsv'])->middleware('fca.admin');
         Route::delete('/fca/users/clear-imported', [FcaController::class, 'clearImported'])->middleware('fca.admin');
         Route::put('/fca/users/{id}', [FcaController::class, 'updateUser'])->middleware('fca.admin');
