@@ -13,6 +13,27 @@ use Illuminate\Support\Facades\Log;
 
 class ExportController extends Controller
 {
+    private function normalizeMotivoValue(?string $value): string
+    {
+        $text = trim((string) $value);
+        $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
+
+        return strtolower($ascii !== false ? $ascii : $text);
+    }
+
+    private function motivoVistoriaManutencao($agenda): string
+    {
+        foreach ([$agenda?->motivo_vistoria, $agenda?->tipo_trabalho] as $value) {
+            $normalized = $this->normalizeMotivoValue($value);
+
+            if ($normalized !== '' && !in_array($normalized, ['manutencao', 'ativacao'], true)) {
+                return $value;
+            }
+        }
+
+        return 'N/A';
+    }
+
     public function exportQualidade(Request $request)
     {
         $validated = $request->validate([
@@ -41,6 +62,7 @@ class ExportController extends Controller
             'poste_passagem_equipado_3',
             'esticadores_corretos',
             'equipagem_poste_cliente',
+            'tecnico_deixou_local_limpo_externo',
             'equipagem_fachada_cliente',
             'passagem_drop_externa',
             'passagem_drop_interna',
@@ -65,6 +87,7 @@ class ExportController extends Controller
             'conector_anilha'               => 'LEVE',     // CONECTOR_CTO_TEM_ANILHA
             'passagem_drop_externa'         => 'GRAVE',    // ENTRADA_CABEAMENTO_CASA_CLIENTE
             'equipagem_poste_cliente'       => 'LEVE',     // EQUIPAGEM_POSTE_CASA_CLIENTE
+            'tecnico_deixou_local_limpo_externo' => 'LEVE',
             'equipagem_fachada_cliente'     => 'MODERADA', // EQUIPAGEM_POSTE_FACHADA_CASA_CLIENTE
             'poste_passagem_equipado'       => 'LEVE',     // EQUIPAGEM_POSTE_ITERMEDIARIO
             'poste_passagem_equipado_1'     => 'LEVE',
@@ -408,7 +431,6 @@ class ExportController extends Controller
             'tecnico_testes_orientou_wifi',
             'cliente_satisfeito_atendimento',
             'ambiente_limpo_organizado',
-            'retorno_tecnico',
         ];
 
         $checklistHeaders = [];
@@ -472,7 +494,7 @@ class ExportController extends Controller
                             $vistoria->agenda?->caso ?? 'N/A',
                             $vistoria->agenda?->nome_conta ?? 'N/A',
                             $vistoria->agenda?->endereco ?? 'N/A',
-                            $vistoria->agenda?->motivo_vistoria ?? $vistoria->agenda?->tipo_trabalho ?? 'N/A',
+                            $this->motivoVistoriaManutencao($vistoria->agenda),
                             $vistoria->observacoes_gerais ?? '',
                         ];
 

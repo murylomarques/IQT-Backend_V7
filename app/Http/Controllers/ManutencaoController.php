@@ -29,6 +29,31 @@ class ManutencaoController extends Controller
         return ['Não', 'Nao'];
     }
 
+    private function getMotivoVistoriaExpression(): string
+    {
+        return "
+            COALESCE(
+                NULLIF(
+                    CASE
+                        WHEN LOWER(TRIM(motivo_vistoria)) IN ('manutencao', 'manutenção', 'ativacao', 'ativação')
+                            THEN ''
+                        ELSE TRIM(motivo_vistoria)
+                    END,
+                    ''
+                ),
+                NULLIF(
+                    CASE
+                        WHEN LOWER(TRIM(tipo_trabalho)) IN ('manutencao', 'manutenção', 'ativacao', 'ativação')
+                            THEN ''
+                        ELSE TRIM(tipo_trabalho)
+                    END,
+                    ''
+                ),
+                'N/A'
+            ) as Motivo
+        ";
+    }
+
     private function normalizeAnswer(?string $value): string
     {
         return trim(preg_replace('/\s+/', ' ', strtolower(Str::ascii($value ?? ''))));
@@ -45,10 +70,6 @@ class ManutencaoController extends Controller
                 ->orWhere(function (Builder $sub) {
                     $sub->where('item_key', 'cliente_satisfeito_atendimento')
                         ->whereIn('status', $this->getNaoValues());
-                })
-                ->orWhere(function (Builder $sub) {
-                    $sub->where('item_key', 'retorno_tecnico')
-                        ->where('status', 'Sim');
                 });
         });
     }
@@ -61,7 +82,7 @@ class ManutencaoController extends Controller
             return true;
         }
 
-        if (in_array($key, ['riscos_qualidade_interrupcao', 'emenda_cabo_drop', 'retorno_tecnico'], true)
+        if (in_array($key, ['riscos_qualidade_interrupcao', 'emenda_cabo_drop'], true)
             && $normalizedStatus === 'sim') {
             return true;
         }
@@ -156,7 +177,7 @@ class ManutencaoController extends Controller
             'cto as CTO',
             'porta as Porta',
             'territorio as Territorio',
-            DB::raw("COALESCE(motivo_vistoria, tipo_trabalho, tipo_servico) as Motivo")
+            DB::raw($this->getMotivoVistoriaExpression())
         )
             ->orderBy('id')
             ->paginate($perPage);
@@ -193,7 +214,7 @@ class ManutencaoController extends Controller
                 'cto as CTO',
                 'porta as Porta',
                 'territorio as Territorio',
-                DB::raw("COALESCE(motivo_vistoria, tipo_trabalho, tipo_servico) as Motivo")
+                DB::raw($this->getMotivoVistoriaExpression())
             )
             ->where('id', $id)
             ->first();
@@ -381,15 +402,6 @@ class ManutencaoController extends Controller
                 ]);
             }
 
-            if ($retornoSolicitado) {
-                $vistoria->checklistItens()->create([
-                    'item_key' => 'retorno_tecnico',
-                    'status' => 'Sim',
-                    'observacao' => 'Retorno do tecnico solicitado pelo fiscal.',
-                    'foto_path' => null,
-                ]);
-            }
-
             $agenda->update([
                 'status' => 'Concluído',
                 'statusAgendamento' => 'Concluído',
@@ -532,7 +544,7 @@ class ManutencaoController extends Controller
     {
         $vistoria->load([
             'fiscal:id,nome',
-            'agenda:id,numero_compromisso,caso,nome_conta,endereco,nome_tecnico,empresa_tecnico,regional,city,motivo_vistoria,tipo_trabalho',
+            'agenda:id,numero_compromisso,caso,nome_conta,endereco,nome_tecnico,empresa_tecnico,regional,city,motivo_vistoria,tipo_trabalho,tipo_servico',
             'checklistItens',
         ]);
 
