@@ -293,7 +293,12 @@ agregado AS (
             3
         ) AS pontuacao_total,
 
-        SUM(flag_irr) AS qtd_irr,
+        SUM(
+            CASE
+                WHEN tipo_os = 'REPARO PREV' THEN 0
+                ELSE flag_irr
+            END
+        ) AS qtd_irr,
 
         -- ====================================================
         -- QUANTIDADE POR TIPO DE SERVIÇO
@@ -394,7 +399,6 @@ agregado AS (
             CASE
                 WHEN tipo_os IN (
                     'REPARO',
-                    'REPARO PREV',
                     'MUD END',
                     'OUTROS SERVIÇOS'
                 )
@@ -410,7 +414,6 @@ agregado AS (
             CASE
                 WHEN tipo_os IN (
                     'REPARO',
-                    'REPARO PREV',
                     'MUD END',
                     'OUTROS SERVIÇOS'
                 )
