@@ -147,14 +147,6 @@ class ManutencaoController extends Controller
         return $this->normalizeAnswer($value) === 'sim';
     }
 
-    private function markOverdueBacklogItems(): void
-    {
-        VistoriaManutencao::query()
-            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
-            ->where('created_at', '<', now()->subHours(72))
-            ->update(['status_laudo' => 'Vencido']);
-    }
-
     public function atendimentos(Request $request)
     {
         $today = Carbon::today()->toDateString();
@@ -477,8 +469,6 @@ class ManutencaoController extends Controller
 
     public function backlog()
     {
-        $this->markOverdueBacklogItems();
-
         $user = Auth::user();
         $empresaNome = $user->empresa?->nome ?? null;
 
@@ -530,8 +520,7 @@ class ManutencaoController extends Controller
 
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->format('Y-m-d H:i');
-            $deadline = $vistoria->created_at?->copy()->addHours(72);
-            $slaStatus = ($vistoria->status_laudo === 'Vencido' || ($deadline && now()->gt($deadline))) ? 'Vencido' : 'No Prazo';
+            $slaStatus = $vistoria->status_laudo === 'Vencido' ? 'Vencido' : 'No Prazo';
 
             $correcaoStatus = 'Sem pendencia';
             if (($vistoria->itens_em_analise ?? 0) > 0) {

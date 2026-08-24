@@ -87,14 +87,6 @@ class VistoriaController extends Controller
         return $hasScope;
     }
 
-    private function markOverdueBacklogItems(): void
-    {
-        Vistoria::query()
-            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
-            ->where('created_at', '<', now()->subHours(72))
-            ->update(['status_laudo' => 'Vencido']);
-    }
-
     /**
      * Armazena uma nova vistoria completa vinda do fiscal.
      */
@@ -202,8 +194,6 @@ class VistoriaController extends Controller
      */
     public function backlog(Request $request)
     {
-        $this->markOverdueBacklogItems();
-
         $user = Auth::user();
         $empresaNome = $user->empresa?->nome ?? null;
         $naoConformeValues = $this->getNaoConformeValues();
@@ -259,10 +249,7 @@ class VistoriaController extends Controller
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->toDateString();
             $dataSla = $vistoria->created_at?->copy()->addHours(72)?->format('Y-m-d H:i');
-            $slaStatus = ($vistoria->status_laudo === 'Vencido'
-                || ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addHours(72))))
-                ? 'Vencido'
-                : 'No Prazo';
+            $slaStatus = $vistoria->status_laudo === 'Vencido' ? 'Vencido' : 'No Prazo';
 
             $correcaoStatus = 'Sem pendencia';
             if (($vistoria->itens_em_analise ?? 0) > 0) {
