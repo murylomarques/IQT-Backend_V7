@@ -22,7 +22,7 @@ class UserController extends Controller
     {
         // Carrega todos os usuários, incluindo as informações de sua empresa e cargo,
         // ordenados pelos mais recentes.
-        return User::with(['empresa:id,nome', 'cargo:id,nome', 'regional:id,nome'])->latest()->get();
+        return User::with(['empresa:id,nome', 'cargo:id,nome'])->latest()->get();
     }
 
     /**
@@ -38,7 +38,6 @@ class UserController extends Controller
             'empresa_id' => 'nullable|exists:empresas,id',
             'cargo_id' => 'nullable|exists:cargos,id',
             'regional_id' => 'nullable|exists:regionais,id',
-            'territorio' => 'nullable|string|max:255',
             // Adicione outras validações para 'numero', 'cpf', etc., se necessário
         ]);
 
@@ -57,7 +56,7 @@ class UserController extends Controller
         );
 
         // Retorna o usuário recém-criado com as relações carregadas
-        return response()->json($user->load(['empresa', 'cargo', 'regional']), 201);
+        return response()->json($user->load(['empresa', 'cargo']), 201);
     }
 
     /**
@@ -67,7 +66,7 @@ class UserController extends Controller
     public function show(User $user)
     {
         // Carrega as relações para garantir que os dados de empresa e cargo sejam incluídos
-        return $user->load(['empresa', 'cargo', 'regional']);
+        return $user->load(['empresa', 'cargo']);
     }
 
     /**
@@ -83,7 +82,6 @@ class UserController extends Controller
             'empresa_id' => 'nullable|exists:empresas,id',
             'cargo_id' => 'nullable|exists:cargos,id',
             'regional_id' => 'nullable|exists:regionais,id',
-            'territorio' => 'nullable|string|max:255',
         ]);
 
         // Se uma nova senha for fornecida, valida e criptografa
@@ -104,7 +102,7 @@ class UserController extends Controller
         );
 
         // Retorna o usuário atualizado com as relações carregadas
-        return response()->json($user->load(['empresa', 'cargo', 'regional']));
+        return response()->json($user->load(['empresa', 'cargo']));
     }
 
     /**

@@ -59,57 +59,6 @@ class ManutencaoController extends Controller
         return trim(preg_replace('/\s+/', ' ', strtolower(Str::ascii($value ?? ''))));
     }
 
-    private function motivoVistoriaFromAgenda(?AgendaManutencao $agenda): string
-    {
-        foreach ([$agenda?->motivo_vistoria, $agenda?->tipo_trabalho] as $value) {
-            $normalized = $this->normalizeAnswer($value);
-
-            if ($normalized !== '' && !in_array($normalized, ['manutencao', 'ativacao'], true)) {
-                return $value;
-            }
-        }
-
-        return 'N/A';
-    }
-
-    private function applyBacklogUserScope(Builder $query, User $user, ?string $empresaNome): bool
-    {
-        $hasScope = false;
-
-        if ($empresaNome) {
-            $query->whereHas('agenda', function ($q) use ($empresaNome) {
-                $q->where('empresa_tecnico', $empresaNome);
-            });
-            $hasScope = true;
-        }
-
-        $territorio = trim((string) ($user->territorio ?? ''));
-        if ($territorio !== '') {
-            $query->whereHas('agenda', function ($q) use ($territorio) {
-                $q->where('territorio', $territorio);
-            });
-            return true;
-        }
-
-        if ($user->regional_id) {
-            $regional = Regional::find($user->regional_id);
-            if ($regional) {
-                $regionalNome = $regional->nome;
-                $query->whereHas('agenda', function ($q) use ($regionalNome) {
-                    $q->where('regional', $regionalNome);
-                });
-                $hasScope = true;
-            }
-        }
-
-        if (!$hasScope && (int) $user->cargo_id === 3) {
-            $query->where('fiscal_id', $user->id);
-            $hasScope = true;
-        }
-
-        return $hasScope;
-    }
-
     private function applyIssueFilter($query)
     {
         return $query->where(function (Builder $q) {
@@ -150,7 +99,7 @@ class ManutencaoController extends Controller
     private function markOverdueBacklogItems(): void
     {
         VistoriaManutencao::query()
-            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
+            ->where('status_laudo', '!=', 'Finalizado')
             ->where('created_at', '<', now()->subHours(72))
             ->update(['status_laudo' => 'Vencido']);
     }
@@ -484,7 +433,7 @@ class ManutencaoController extends Controller
 
         $query = VistoriaManutencao::query()
             ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'retorno_tecnico', 'resultado_final', 'status_laudo', 'created_at'])
-            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
+            ->where('status_laudo', '!=', 'Finalizado')
             ->withCount([
                 'checklistItens as itens_nao_conformes' => function (Builder $q) {
                     $this->applyIssueFilter($q);
@@ -501,14 +450,9 @@ class ManutencaoController extends Controller
             ]);
 
         $concluidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Finalizado');
-        $vencidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Vencido');
 
         if ($user->cargo_id != 1) {
-            $hasScope = $this->applyBacklogUserScope($query, $user, $empresaNome);
-            $this->applyBacklogUserScope($concluidosQuery, $user, $empresaNome);
-            $this->applyBacklogUserScope($vencidosQuery, $user, $empresaNome);
-
-            if (!$hasScope) {
+            if (!$empresaNome) {
                 return response()->json([
                     'tableData' => collect(),
                     'kpiData' => [
@@ -516,16 +460,37 @@ class ManutencaoController extends Controller
                         'slaVencido' => 0,
                         'concluidos' => 0,
                     ],
-                    'message' => 'Usuario sem empresa, territorio, regional ou fiscalizacao vinculada',
+                    'message' => 'Usuario sem empresa vinculada',
                 ]);
             }
 
+            $query->whereHas('agenda', function ($q) use ($empresaNome) {
+                $q->where('empresa_tecnico', $empresaNome);
+            });
+
+            $concluidosQuery->whereHas('agenda', function ($q) use ($empresaNome) {
+                $q->where('empresa_tecnico', $empresaNome);
+            });
+
+            // Segmentação por regional: se o usuário tem regional vinculada, filtra por ela
+            if ($user->regional_id) {
+                $regional = Regional::find($user->regional_id);
+                if ($regional) {
+                    $regionalNome = $regional->nome;
+                    $query->whereHas('agenda', function ($q) use ($regionalNome) {
+                        $q->where('regional', $regionalNome);
+                    });
+                    $concluidosQuery->whereHas('agenda', function ($q) use ($regionalNome) {
+                        $q->where('regional', $regionalNome);
+                    });
+                }
+            }
         }
 
         $vistorias = $query->with([
             'fiscal:id,nome,empresa_id',
             'fiscal.empresa:id,nome',
-            'agenda:id,numero_compromisso,caso,empresa_tecnico,nome_tecnico,territorio,regional,city,motivo_vistoria,tipo_trabalho,created_at',
+            'agenda:id,numero_compromisso,caso,empresa_tecnico,nome_tecnico,territorio,regional,city,created_at',
         ])->latest()->get();
 
         $formattedData = $vistorias->map(function ($vistoria) {
@@ -552,7 +517,6 @@ class ManutencaoController extends Controller
                 'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
                 'supervisor' => 'N/A',
                 'protocolo' => $vistoria->agenda?->numero_compromisso ?? $vistoria->agenda?->caso ?? 'N/A',
-                'motivoVistoria' => $this->motivoVistoriaFromAgenda($vistoria->agenda),
                 'territorio' => $vistoria->agenda?->territorio ?? $vistoria->agenda?->regional ?? 'N/A',
                 'cidade' => $vistoria->agenda?->city ?? 'N/A',
                 'data' => $dataLaudo,
@@ -560,6 +524,7 @@ class ManutencaoController extends Controller
                 'sla' => $slaStatus,
                 'statusLaudo' => $vistoria->status_laudo,
                 'resultadoFinal' => $vistoria->resultado_final,
+                'retornoTecnico' => $vistoria->retorno_tecnico,
                 'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
                 'correcaoStatus' => $correcaoStatus,
             ];
@@ -569,7 +534,7 @@ class ManutencaoController extends Controller
             'tableData' => $formattedData,
             'kpiData' => [
                 'totalBacklog' => $formattedData->count(),
-                'slaVencido' => $vencidosQuery->count(),
+                'slaVencido' => $formattedData->where('sla', 'Vencido')->count(),
                 'concluidos' => $concluidosQuery->count(),
             ],
         ]);

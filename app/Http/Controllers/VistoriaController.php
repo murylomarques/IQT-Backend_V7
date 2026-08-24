@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Agenda;
-use App\Models\Regional;
 use App\Models\Vistoria;
 use App\Models\VistoriaChecklistItem;
 use App\Services\ActivityLogService;
@@ -47,52 +46,6 @@ class VistoriaController extends Controller
             'Em AnÃ¡lise',
             $this->getEmAnaliseStatusValue(),
         ]));
-    }
-
-    private function applyBacklogUserScope($query, $user, ?string $empresaNome): bool
-    {
-        $hasScope = false;
-
-        if ($empresaNome) {
-            $query->whereHas('agenda', function ($q) use ($empresaNome) {
-                $q->where('empresa_tecnico', $empresaNome);
-            });
-            $hasScope = true;
-        }
-
-        $territorio = trim((string) ($user->territorio ?? ''));
-        if ($territorio !== '') {
-            $query->whereHas('agenda', function ($q) use ($territorio) {
-                $q->where('territorio', $territorio);
-            });
-            return true;
-        }
-
-        if ($user->regional_id) {
-            $regional = Regional::find($user->regional_id);
-            if ($regional) {
-                $regionalNome = $regional->nome;
-                $query->whereHas('agenda', function ($q) use ($regionalNome) {
-                    $q->where('territorio', $regionalNome);
-                });
-                $hasScope = true;
-            }
-        }
-
-        if (!$hasScope && (int) $user->cargo_id === 3) {
-            $query->where('fiscal_id', $user->id);
-            $hasScope = true;
-        }
-
-        return $hasScope;
-    }
-
-    private function markOverdueBacklogItems(): void
-    {
-        Vistoria::query()
-            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
-            ->where('created_at', '<', now()->subHours(72))
-            ->update(['status_laudo' => 'Vencido']);
     }
 
     /**
@@ -202,8 +155,6 @@ class VistoriaController extends Controller
      */
     public function backlog(Request $request)
     {
-        $this->markOverdueBacklogItems();
-
         $user = Auth::user();
         $empresaNome = $user->empresa?->nome ?? null;
         $naoConformeValues = $this->getNaoConformeValues();
@@ -230,14 +181,9 @@ class VistoriaController extends Controller
             ]);
 
         $concluidosQuery = Vistoria::query()->where('status_laudo', 'Finalizado');
-        $vencidosQuery = Vistoria::query()->where('status_laudo', 'Vencido');
 
         if ($user->cargo_id != 1) {
-            $hasScope = $this->applyBacklogUserScope($query, $user, $empresaNome);
-            $this->applyBacklogUserScope($concluidosQuery, $user, $empresaNome);
-            $this->applyBacklogUserScope($vencidosQuery, $user, $empresaNome);
-
-            if (!$hasScope) {
+            if (!$empresaNome) {
                 return response()->json([
                     'tableData' => collect(),
                     'kpiData' => [
@@ -245,9 +191,17 @@ class VistoriaController extends Controller
                         'slaVencido' => 0,
                         'concluidos' => 0,
                     ],
-                    'message' => 'Usuario sem empresa, territorio, regional ou fiscalizacao vinculada',
+                    'message' => 'Usuario sem empresa vinculada',
                 ]);
             }
+
+            $query->whereHas('agenda', function ($q) use ($empresaNome) {
+                $q->where('empresa_tecnico', $empresaNome);
+            });
+
+            $concluidosQuery->whereHas('agenda', function ($q) use ($empresaNome) {
+                $q->where('empresa_tecnico', $empresaNome);
+            });
         }
 
         $vistorias = $query->with([
@@ -258,9 +212,8 @@ class VistoriaController extends Controller
 
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->toDateString();
-            $dataSla = $vistoria->created_at?->copy()->addHours(72)?->format('Y-m-d H:i');
-            $slaStatus = ($vistoria->status_laudo === 'Vencido'
-                || ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addHours(72))))
+            $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
+            $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5)))
                 ? 'Vencido'
                 : 'No Prazo';
 
@@ -293,7 +246,7 @@ class VistoriaController extends Controller
 
         $kpiData = [
             'totalBacklog' => $formattedData->count(),
-            'slaVencido' => $vencidosQuery->count(),
+            'slaVencido' => $formattedData->where('sla', 'Vencido')->count(),
             'concluidos' => $concluidosQuery->count(),
         ];
 
