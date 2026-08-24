@@ -248,7 +248,7 @@ class VistoriaController extends Controller
 
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->toDateString();
-            $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
+            $dataSla = $vistoria->created_at?->copy()->addHours(72)?->format('Y-m-d H:i');
             $slaStatus = $vistoria->status_laudo === 'Vencido' ? 'Vencido' : 'No Prazo';
 
             $correcaoStatus = 'Sem pendencia';
