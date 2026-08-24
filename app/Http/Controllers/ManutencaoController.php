@@ -520,6 +520,7 @@ class ManutencaoController extends Controller
 
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->format('Y-m-d H:i');
+            $dataSla = $vistoria->created_at?->copy()->addHours(72)?->format('Y-m-d H:i');
             $slaStatus = $vistoria->status_laudo === 'Vencido' ? 'Vencido' : 'No Prazo';
 
             $correcaoStatus = 'Sem pendencia';
@@ -545,7 +546,7 @@ class ManutencaoController extends Controller
                 'territorio' => $vistoria->agenda?->territorio ?? $vistoria->agenda?->regional ?? 'N/A',
                 'cidade' => $vistoria->agenda?->city ?? 'N/A',
                 'data' => $dataLaudo,
-                'dataSla' => $deadline?->format('Y-m-d H:i'),
+                'dataSla' => $dataSla,
                 'sla' => $slaStatus,
                 'statusLaudo' => $vistoria->status_laudo,
                 'resultadoFinal' => $vistoria->resultado_final,
