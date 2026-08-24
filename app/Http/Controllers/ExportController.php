@@ -13,6 +13,11 @@ use Illuminate\Support\Facades\Log;
 
 class ExportController extends Controller
 {
+    private function ensureAdminExport(): void
+    {
+        abort_if((int) (auth()->user()?->cargo_id ?? 0) !== 1, 403, 'Nao autorizado');
+    }
+
     private function normalizeMotivoValue(?string $value): string
     {
         $text = trim((string) $value);
@@ -36,6 +41,8 @@ class ExportController extends Controller
 
     public function exportQualidade(Request $request)
     {
+        $this->ensureAdminExport();
+
         $validated = $request->validate([
             'start_date' => 'required|date_format:Y-m-d',
             'end_date'   => 'required|date_format:Y-m-d|after_or_equal:start_date',
@@ -318,6 +325,8 @@ class ExportController extends Controller
 
     public function exportSeguranca(Request $request)
     {
+        $this->ensureAdminExport();
+
         $request->validate([
             'start_date' => 'required|date',
             'end_date'   => 'required|date|after_or_equal:start_date',
@@ -402,6 +411,8 @@ class ExportController extends Controller
 
     public function exportManutencao(Request $request): StreamedResponse
     {
+        $this->ensureAdminExport();
+
         $validated = $request->validate([
             'start_date' => 'required|date_format:Y-m-d',
             'end_date'   => 'required|date_format:Y-m-d|after_or_equal:start_date',
