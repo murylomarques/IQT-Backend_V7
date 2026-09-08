@@ -13,21 +13,57 @@ use Illuminate\Support\Facades\Log;
 
 class ExportController extends Controller
 {
+    private const GENERIC_MAINTENANCE_REASON_VALUES = [
+        'manutencao',
+        'manutencao corretiva',
+        'manutencao preventiva',
+        'ativacao',
+        'instalacao',
+        'instalacao fibra',
+        'reparo',
+        'reparo prev',
+        'mudanca de endereco',
+        'mud end',
+        'retirada',
+        'outros servicos',
+        'servicos adicionais',
+    ];
+
     private function normalizeMotivoValue(?string $value): string
     {
         $text = trim((string) $value);
         $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
 
-        return strtolower($ascii !== false ? $ascii : $text);
+        return trim(preg_replace('/\s+/', ' ', strtolower($ascii !== false ? $ascii : $text)));
+    }
+
+    private function specificMotivoValue(?string $value): ?string
+    {
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        $normalized = $this->normalizeMotivoValue($text);
+        foreach (self::GENERIC_MAINTENANCE_REASON_VALUES as $generic) {
+            if ($normalized === $generic) {
+                return null;
+            }
+
+            if (str_starts_with($normalized, $generic . ' - ') || str_starts_with($normalized, $generic . ': ')) {
+                return trim(preg_replace('/^[^-:]+[-:]\s*/', '', $text)) ?: null;
+            }
+        }
+
+        return $text;
     }
 
     private function motivoVistoriaManutencao($agenda): string
     {
         foreach ([$agenda?->motivo_vistoria, $agenda?->tipo_trabalho] as $value) {
-            $normalized = $this->normalizeMotivoValue($value);
-
-            if ($normalized !== '' && !in_array($normalized, ['manutencao', 'ativacao'], true)) {
-                return $value;
+            $motivo = $this->specificMotivoValue($value);
+            if ($motivo !== null) {
+                return $motivo;
             }
         }
 
@@ -402,6 +438,12 @@ class ExportController extends Controller
 
     public function exportManutencao(Request $request): StreamedResponse
     {
+        abort_unless(
+            (int) $request->user()?->cargo_id === 1,
+            403,
+            'Exportacao de manutencao permitida apenas para administrador.'
+        );
+
         $validated = $request->validate([
             'start_date' => 'required|date_format:Y-m-d',
             'end_date'   => 'required|date_format:Y-m-d|after_or_equal:start_date',

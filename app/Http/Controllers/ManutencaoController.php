@@ -19,6 +19,26 @@ use Illuminate\Support\Str;
 
 class ManutencaoController extends Controller
 {
+    private const ADMIN_CARGO_ID = 1;
+    private const TERCEIRIZADO_CARGO_ID = 2;
+    private const USUARIO_PROPRIO_CARGO_ID = 3;
+    private const MAINTENANCE_SLA_HOURS = 72;
+    private const GENERIC_MAINTENANCE_REASON_VALUES = [
+        'manutencao',
+        'manutencao corretiva',
+        'manutencao preventiva',
+        'ativacao',
+        'instalacao',
+        'instalacao fibra',
+        'reparo',
+        'reparo prev',
+        'mudanca de endereco',
+        'mud end',
+        'retirada',
+        'outros servicos',
+        'servicos adicionais',
+    ];
+
     private function getNaoConformeValues(): array
     {
         return ['Não Conforme', 'Nao Conforme'];
@@ -29,29 +49,51 @@ class ManutencaoController extends Controller
         return ['Não', 'Nao'];
     }
 
-    private function getMotivoVistoriaExpression(): string
+    private function normalizeReasonValue(?string $value): string
     {
-        return "
-            COALESCE(
-                NULLIF(
-                    CASE
-                        WHEN LOWER(TRIM(motivo_vistoria)) IN ('manutencao', 'manutenção', 'ativacao', 'ativação')
-                            THEN ''
-                        ELSE TRIM(motivo_vistoria)
-                    END,
-                    ''
-                ),
-                NULLIF(
-                    CASE
-                        WHEN LOWER(TRIM(tipo_trabalho)) IN ('manutencao', 'manutenção', 'ativacao', 'ativação')
-                            THEN ''
-                        ELSE TRIM(tipo_trabalho)
-                    END,
-                    ''
-                ),
-                'N/A'
-            ) as Motivo
-        ";
+        return trim(preg_replace('/\s+/', ' ', strtolower(Str::ascii($value ?? ''))));
+    }
+
+    private function specificReasonFromValue(?string $value): ?string
+    {
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        foreach (self::GENERIC_MAINTENANCE_REASON_VALUES as $generic) {
+            $normalized = $this->normalizeReasonValue($text);
+
+            if ($normalized === $generic) {
+                return null;
+            }
+
+            if (str_starts_with($normalized, $generic . ' - ') || str_starts_with($normalized, $generic . ': ')) {
+                return trim(preg_replace('/^[^-:]+[-:]\s*/', '', $text)) ?: null;
+            }
+        }
+
+        return $text;
+    }
+
+    private function resolveMotivoVistoria($source): string
+    {
+        foreach ([$source?->motivo_vistoria, $source?->tipo_trabalho] as $value) {
+            $reason = $this->specificReasonFromValue($value);
+            if ($reason !== null) {
+                return $reason;
+            }
+        }
+
+        return 'N/A';
+    }
+
+    private function formatMaintenanceAppointment($appointment)
+    {
+        $appointment->Motivo = $this->resolveMotivoVistoria($appointment);
+        unset($appointment->motivo_vistoria, $appointment->tipo_trabalho);
+
+        return $appointment;
     }
 
     private function normalizeAnswer(?string $value): string
@@ -96,28 +138,276 @@ class ManutencaoController extends Controller
         return $this->normalizeAnswer($value) === 'sim';
     }
 
+    private function isAdmin(User $user): bool
+    {
+        return (int) $user->cargo_id === self::ADMIN_CARGO_ID;
+    }
+
+    private function isTerceirizado(User $user): bool
+    {
+        return (int) $user->cargo_id === self::TERCEIRIZADO_CARGO_ID;
+    }
+
+    private function isUsuarioProprioManutencao(User $user): bool
+    {
+        return (int) $user->cargo_id === self::USUARIO_PROPRIO_CARGO_ID;
+    }
+
+    private function userMaintenanceTerritoryName(User $user): ?string
+    {
+        if (!$user->regional_id) {
+            return null;
+        }
+
+        return Regional::find($user->regional_id)?->nome;
+    }
+
+    private function normalizeScopeValue(?string $value): string
+    {
+        return preg_replace('/[\s_-]+/', '', strtolower(Str::ascii(trim((string) $value)))) ?? '';
+    }
+
+    private function applyAgendaTerritoryFilter(Builder $query, string $territoryName): Builder
+    {
+        $normalizedTerritory = $this->normalizeScopeValue($territoryName);
+
+        return $query->where(function (Builder $q) use ($normalizedTerritory) {
+            foreach (['regional', 'territorio'] as $column) {
+                $q->orWhereRaw(
+                    "LOWER(REPLACE(REPLACE(REPLACE(COALESCE({$column}, ''), ' ', ''), '_', ''), '-', '')) = ?",
+                    [$normalizedTerritory]
+                );
+            }
+        });
+    }
+
+    private function agendaMatchesMaintenanceTerritory($agenda, string $territoryName): bool
+    {
+        $allowed = $this->normalizeScopeValue($territoryName);
+
+        return in_array($allowed, [
+            $this->normalizeScopeValue($agenda?->regional),
+            $this->normalizeScopeValue($agenda?->territorio),
+        ], true);
+    }
+
+    private function userCanAccessMaintenanceAgenda(AgendaManutencao $agenda, User $user, bool $requireAssignment = false): bool
+    {
+        if ($this->isAdmin($user)) {
+            return true;
+        }
+
+        if ($requireAssignment && (int) $agenda->fiscal_id !== (int) $user->id) {
+            return false;
+        }
+
+        if ($this->isUsuarioProprioManutencao($user)) {
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+
+            return $territoryName !== null && $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
+        }
+
+        if ($this->isTerceirizado($user)) {
+            $empresaNome = $user->empresa?->nome ?? null;
+            if (!$empresaNome || ($agenda->empresa_tecnico ?? null) !== $empresaNome) {
+                return false;
+            }
+
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+
+            return $territoryName === null || $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
+        }
+
+        return false;
+    }
+
+    private function applyMaintenanceVisibilityScope(Builder $query, User $user): ?string
+    {
+        if ($this->isAdmin($user)) {
+            return null;
+        }
+
+        if ($this->isUsuarioProprioManutencao($user)) {
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+            if (!$territoryName) {
+                return 'Usuario proprio sem territorio de manutencao vinculado';
+            }
+
+            $query->whereHas('agenda', function (Builder $q) use ($territoryName) {
+                $this->applyAgendaTerritoryFilter($q, $territoryName);
+            });
+
+            return null;
+        }
+
+        if ($this->isTerceirizado($user)) {
+            $empresaNome = $user->empresa?->nome ?? null;
+            if (!$empresaNome) {
+                return 'Usuario sem empresa vinculada';
+            }
+
+            $query->whereHas('agenda', function (Builder $q) use ($empresaNome) {
+                $q->where('empresa_tecnico', $empresaNome);
+            });
+
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+            if ($territoryName) {
+                $query->whereHas('agenda', function (Builder $q) use ($territoryName) {
+                    $this->applyAgendaTerritoryFilter($q, $territoryName);
+                });
+            }
+
+            return null;
+        }
+
+        return 'Perfil sem permissao para manutencao';
+    }
+
+    private function applyMaintenanceSourceVisibilityScope(Builder $query, User $user): ?string
+    {
+        if ($this->isAdmin($user)) {
+            return null;
+        }
+
+        if ($this->isUsuarioProprioManutencao($user)) {
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+            if (!$territoryName) {
+                return 'Usuario proprio sem territorio de manutencao vinculado';
+            }
+
+            $this->applyAgendaTerritoryFilter($query, $territoryName);
+
+            return null;
+        }
+
+        if ($this->isTerceirizado($user)) {
+            $empresaNome = $user->empresa?->nome ?? null;
+            if (!$empresaNome) {
+                return 'Usuario sem empresa vinculada';
+            }
+
+            $query->where('empresa_tecnico', $empresaNome);
+
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+            if ($territoryName) {
+                $this->applyAgendaTerritoryFilter($query, $territoryName);
+            }
+
+            return null;
+        }
+
+        return 'Perfil sem permissao para manutencao';
+    }
+
+    private function applyMaintenanceAgendaVisibilityScope(Builder $query, User $user): ?string
+    {
+        if ($this->isAdmin($user)) {
+            return null;
+        }
+
+        if ($this->isUsuarioProprioManutencao($user)) {
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+            if (!$territoryName) {
+                return 'Usuario proprio sem territorio de manutencao vinculado';
+            }
+
+            $this->applyAgendaTerritoryFilter($query, $territoryName);
+
+            return null;
+        }
+
+        if ($this->isTerceirizado($user)) {
+            $empresaNome = $user->empresa?->nome ?? null;
+            if (!$empresaNome) {
+                return 'Usuario sem empresa vinculada';
+            }
+
+            $query->where('empresa_tecnico', $empresaNome);
+
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+            if ($territoryName) {
+                $this->applyAgendaTerritoryFilter($query, $territoryName);
+            }
+
+            return null;
+        }
+
+        return 'Perfil sem permissao para manutencao';
+    }
+
+    private function userCanAccessMaintenanceVistoria(VistoriaManutencao $vistoria, User $user): bool
+    {
+        if ($this->isAdmin($user)) {
+            return true;
+        }
+
+        $vistoria->loadMissing('agenda');
+        $agenda = $vistoria->agenda;
+
+        if ($this->isUsuarioProprioManutencao($user)) {
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+
+            return $territoryName !== null && $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
+        }
+
+        if ($this->isTerceirizado($user)) {
+            $empresaNome = $user->empresa?->nome ?? null;
+            if (!$empresaNome || ($agenda?->empresa_tecnico ?? null) !== $empresaNome) {
+                return false;
+            }
+
+            $territoryName = $this->userMaintenanceTerritoryName($user);
+
+            return $territoryName === null || $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
+        }
+
+        return false;
+    }
+
+    private function userCanSubmitMaintenanceCorrection(VistoriaManutencaoChecklistItem $item, User $user): bool
+    {
+        $item->loadMissing('vistoria.agenda');
+
+        return ($this->isAdmin($user) || $this->isTerceirizado($user))
+            && $this->userCanAccessMaintenanceVistoria($item->vistoria, $user);
+    }
+
+    private function denyMaintenanceAccessResponse()
+    {
+        return response()->json(['message' => 'Nao autorizado para esta vistoria de manutencao'], 403);
+    }
+
     private function markOverdueBacklogItems(): void
     {
         VistoriaManutencao::query()
             ->where('status_laudo', '!=', 'Finalizado')
-            ->where('created_at', '<', now()->subHours(72))
+            ->where('created_at', '<=', now()->subHours(self::MAINTENANCE_SLA_HOURS))
             ->update(['status_laudo' => 'Vencido']);
     }
 
     public function atendimentos(Request $request)
     {
         $today = Carbon::today()->toDateString();
+        $user = Auth::user();
+        $globalStatsQuery = AgendaManutencao::query();
+        $agendaCountsQuery = AgendaManutencao::query();
+        $agendaScopeError = $this->applyMaintenanceAgendaVisibilityScope($globalStatsQuery, $user)
+            ?? $this->applyMaintenanceAgendaVisibilityScope($agendaCountsQuery, $user);
 
-        $globalStats = [
-            'total_agendamentos' => AgendaManutencao::count(),
-            'pendentes_hoje' => AgendaManutencao::whereDate('data_agendamento', $today)
+        $globalStats = $agendaScopeError ? [
+            'total_agendamentos' => 0,
+            'pendentes_hoje' => 0,
+            'total_concluidos' => 0,
+        ] : [
+            'total_agendamentos' => (clone $globalStatsQuery)->count(),
+            'pendentes_hoje' => (clone $globalStatsQuery)
+                ->whereDate('data_agendamento', $today)
                 ->where('statusAgendamento', 'Pendente')
                 ->count(),
-            'total_concluidos' => AgendaManutencao::where('statusAgendamento', 'Concluído')->count(),
+            'total_concluidos' => (clone $globalStatsQuery)->where('statusAgendamento', 'Concluído')->count(),
         ];
 
-        $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get();
-        $agendaCounts = AgendaManutencao::query()
+        $agendaCounts = $agendaScopeError ? collect() : $agendaCountsQuery
             ->select(
                 'fiscal_id',
                 DB::raw("SUM(CASE WHEN DATE(data_agendamento) = '{$today}' THEN 1 ELSE 0 END) as agendados_hoje"),
@@ -127,7 +417,12 @@ class ManutencaoController extends Controller
             ->get()
             ->keyBy('fiscal_id');
 
-        $fiscaisStats = $fiscais->map(function ($fiscal) use ($agendaCounts) {
+        $fiscaisQuery = User::where('cargo_id', 3)->select('id', 'nome');
+        if (!$this->isAdmin($user)) {
+            $fiscaisQuery->whereIn('id', $agendaCounts->keys()->all());
+        }
+
+        $fiscaisStats = $fiscaisQuery->get()->map(function ($fiscal) use ($agendaCounts) {
             $item = $agendaCounts->get($fiscal->id);
 
             return [
@@ -138,6 +433,21 @@ class ManutencaoController extends Controller
         });
 
         $query = BaseManutencao::query();
+        $scopeError = $this->applyMaintenanceSourceVisibilityScope($query, $user);
+        if ($scopeError) {
+            return response()->json([
+                'data' => [],
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => $request->query('per_page', 50),
+                'total' => 0,
+                'stats' => [
+                    'global' => $globalStats,
+                    'fiscais' => $fiscaisStats,
+                ],
+                'message' => $scopeError,
+            ]);
+        }
 
         if ($request->filled('tecnico')) {
             $query->where('nome_tecnico', 'like', '%' . $request->query('tecnico') . '%');
@@ -177,13 +487,18 @@ class ManutencaoController extends Controller
             'cto as CTO',
             'porta as Porta',
             'territorio as Territorio',
-            DB::raw($this->getMotivoVistoriaExpression())
+            'motivo_vistoria',
+            'tipo_trabalho'
         )
             ->orderBy('id')
             ->paginate($perPage);
 
+        $data = collect($atendimentos->items())
+            ->map(fn ($appointment) => $this->formatMaintenanceAppointment($appointment))
+            ->values();
+
         return response()->json([
-            'data' => $atendimentos->items(),
+            'data' => $data,
             'current_page' => $atendimentos->currentPage(),
             'last_page' => $atendimentos->lastPage(),
             'per_page' => $atendimentos->perPage(),
@@ -197,7 +512,7 @@ class ManutencaoController extends Controller
 
     public function showAtendimento($id)
     {
-        $appointment = BaseManutencao::query()
+        $query = BaseManutencao::query()
             ->select(
                 'id as ID',
                 'regional as Regional',
@@ -214,14 +529,23 @@ class ManutencaoController extends Controller
                 'cto as CTO',
                 'porta as Porta',
                 'territorio as Territorio',
-                DB::raw($this->getMotivoVistoriaExpression())
+                'motivo_vistoria',
+                'tipo_trabalho'
             )
-            ->where('id', $id)
-            ->first();
+            ->where('id', $id);
+
+        $scopeError = $this->applyMaintenanceSourceVisibilityScope($query, Auth::user());
+        if ($scopeError) {
+            return response()->json(['message' => $scopeError], 403);
+        }
+
+        $appointment = $query->first();
 
         if (!$appointment) {
             return response()->json(['message' => 'Atendimento de manutenção não encontrado'], 404);
         }
+
+        $this->formatMaintenanceAppointment($appointment);
 
         return response()->json($appointment);
     }
@@ -245,11 +569,19 @@ class ManutencaoController extends Controller
         $validatedData = $validator->validated();
         $tipo = $validatedData['agendado'] ? 'Agendado' : 'Não Agendado';
         $agendamento = null;
+        $atendimentoQuery = BaseManutencao::whereKey($validatedData['atendimentoId']);
+        $scopeError = $this->applyMaintenanceSourceVisibilityScope($atendimentoQuery, Auth::user());
+        if ($scopeError) {
+            return response()->json(['message' => $scopeError], 403);
+        }
+
+        $atendimentoOriginal = $atendimentoQuery->first();
+        if (!$atendimentoOriginal) {
+            return response()->json(['message' => 'Atendimento de manutencao nao encontrado ou fora do territorio permitido'], 404);
+        }
 
         try {
-            DB::transaction(function () use ($validatedData, $tipo, &$agendamento) {
-                $atendimentoOriginal = BaseManutencao::findOrFail($validatedData['atendimentoId']);
-
+            DB::transaction(function () use ($validatedData, $tipo, &$agendamento, $atendimentoOriginal) {
                 $agendamento = AgendaManutencao::create([
                     'fiscal_id' => $validatedData['fiscalId'],
                     'data_agendamento' => $validatedData['data'],
@@ -296,25 +628,43 @@ class ManutencaoController extends Controller
 
     public function showAgenda(AgendaManutencao $agenda)
     {
+        if (!$this->userCanAccessMaintenanceAgenda($agenda, Auth::user(), true)) {
+            return response()->json(['message' => 'Nao autorizado para esta agenda de manutencao'], 403);
+        }
+
+        $agenda->setAttribute('motivo_vistoria_resolvido', $this->resolveMotivoVistoria($agenda));
+
         return response()->json($agenda);
     }
 
     public function minhasVistoriasHoje()
     {
-        $vistorias = AgendaManutencao::where('fiscal_id', Auth::id())
+        $query = AgendaManutencao::where('fiscal_id', Auth::id())
             ->whereDate('data_agendamento', Carbon::today())
-            ->orderBy('hora_agendamento', 'asc')
-            ->get();
+            ->orderBy('hora_agendamento', 'asc');
+
+        $scopeError = $this->applyMaintenanceAgendaVisibilityScope($query, Auth::user());
+        if ($scopeError) {
+            return response()->json(['message' => $scopeError], 403);
+        }
+
+        $vistorias = $query->get();
 
         return response()->json($vistorias);
     }
 
     public function agendaFiscal($id)
     {
-        $agenda = AgendaManutencao::where('fiscal_id', $id)
+        $query = AgendaManutencao::where('fiscal_id', $id)
             ->orderBy('data_agendamento')
-            ->orderBy('hora_agendamento')
-            ->get();
+            ->orderBy('hora_agendamento');
+
+        $scopeError = $this->applyMaintenanceAgendaVisibilityScope($query, Auth::user());
+        if ($scopeError) {
+            return response()->json(['message' => $scopeError], 403);
+        }
+
+        $agenda = $query->get();
 
         return response()->json($agenda);
     }
@@ -340,6 +690,12 @@ class ManutencaoController extends Controller
 
         $validatedData = $validator->validated();
         $agenda = AgendaManutencao::findOrFail($validatedData['agenda_manutencao_id']);
+        $user = Auth::user();
+
+        if (!$this->userCanAccessMaintenanceAgenda($agenda, $user, true)) {
+            return response()->json(['message' => 'Nao autorizado para esta agenda de manutencao'], 403);
+        }
+
         $storedPaths = [];
 
         $missingEvidence = [];
@@ -429,10 +785,9 @@ class ManutencaoController extends Controller
         $this->markOverdueBacklogItems();
 
         $user = Auth::user();
-        $empresaNome = $user->empresa?->nome ?? null;
 
         $query = VistoriaManutencao::query()
-            ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'retorno_tecnico', 'resultado_final', 'status_laudo', 'created_at'])
+            ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'resultado_final', 'status_laudo', 'created_at'])
             ->where('status_laudo', '!=', 'Finalizado')
             ->withCount([
                 'checklistItens as itens_nao_conformes' => function (Builder $q) {
@@ -451,40 +806,19 @@ class ManutencaoController extends Controller
 
         $concluidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Finalizado');
 
-        if ($user->cargo_id != 1) {
-            if (!$empresaNome) {
-                return response()->json([
-                    'tableData' => collect(),
-                    'kpiData' => [
-                        'totalBacklog' => 0,
-                        'slaVencido' => 0,
-                        'concluidos' => 0,
-                    ],
-                    'message' => 'Usuario sem empresa vinculada',
-                ]);
-            }
+        $scopeError = $this->applyMaintenanceVisibilityScope($query, $user)
+            ?? $this->applyMaintenanceVisibilityScope($concluidosQuery, $user);
 
-            $query->whereHas('agenda', function ($q) use ($empresaNome) {
-                $q->where('empresa_tecnico', $empresaNome);
-            });
-
-            $concluidosQuery->whereHas('agenda', function ($q) use ($empresaNome) {
-                $q->where('empresa_tecnico', $empresaNome);
-            });
-
-            // Segmentação por regional: se o usuário tem regional vinculada, filtra por ela
-            if ($user->regional_id) {
-                $regional = Regional::find($user->regional_id);
-                if ($regional) {
-                    $regionalNome = $regional->nome;
-                    $query->whereHas('agenda', function ($q) use ($regionalNome) {
-                        $q->where('regional', $regionalNome);
-                    });
-                    $concluidosQuery->whereHas('agenda', function ($q) use ($regionalNome) {
-                        $q->where('regional', $regionalNome);
-                    });
-                }
-            }
+        if ($scopeError) {
+            return response()->json([
+                'tableData' => collect(),
+                'kpiData' => [
+                    'totalBacklog' => 0,
+                    'slaVencido' => 0,
+                    'concluidos' => 0,
+                ],
+                'message' => $scopeError,
+            ]);
         }
 
         $vistorias = $query->with([
@@ -495,8 +829,8 @@ class ManutencaoController extends Controller
 
         $formattedData = $vistorias->map(function ($vistoria) {
             $dataLaudo = $vistoria->created_at?->format('Y-m-d H:i');
-            $deadline = $vistoria->created_at?->copy()->addHours(72);
-            $slaStatus = ($vistoria->status_laudo === 'Vencido' || ($deadline && now()->gt($deadline))) ? 'Vencido' : 'No Prazo';
+            $deadline = $vistoria->created_at?->copy()->addHours(self::MAINTENANCE_SLA_HOURS);
+            $slaStatus = ($vistoria->status_laudo === 'Vencido' || ($deadline && now()->gte($deadline))) ? 'Vencido' : 'No Prazo';
 
             $correcaoStatus = 'Sem pendencia';
             if (($vistoria->itens_em_analise ?? 0) > 0) {
@@ -505,8 +839,6 @@ class ManutencaoController extends Controller
                 $correcaoStatus = 'Aguardando resposta';
             } elseif (($vistoria->itens_nao_conformes ?? 0) > 0) {
                 $correcaoStatus = 'Aguardando resposta';
-            } elseif ($this->isRetornoTecnicoSolicitado($vistoria->retorno_tecnico)) {
-                $correcaoStatus = 'Retorno tecnico solicitado';
             }
 
             return [
@@ -524,7 +856,6 @@ class ManutencaoController extends Controller
                 'sla' => $slaStatus,
                 'statusLaudo' => $vistoria->status_laudo,
                 'resultadoFinal' => $vistoria->resultado_final,
-                'retornoTecnico' => $vistoria->retorno_tecnico,
                 'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
                 'correcaoStatus' => $correcaoStatus,
             ];
@@ -542,17 +873,26 @@ class ManutencaoController extends Controller
 
     public function showVistoria(VistoriaManutencao $vistoria)
     {
+        if (!$this->userCanAccessMaintenanceVistoria($vistoria, Auth::user())) {
+            return $this->denyMaintenanceAccessResponse();
+        }
+
         $vistoria->load([
             'fiscal:id,nome',
             'agenda:id,numero_compromisso,caso,nome_conta,endereco,nome_tecnico,empresa_tecnico,regional,city,motivo_vistoria,tipo_trabalho,tipo_servico',
             'checklistItens',
         ]);
+        $vistoria->agenda?->setAttribute('motivo_vistoria_resolvido', $this->resolveMotivoVistoria($vistoria->agenda));
 
         return response()->json($vistoria);
     }
 
     public function resolverItem(Request $request, VistoriaManutencaoChecklistItem $item)
     {
+        if (!$this->userCanSubmitMaintenanceCorrection($item, Auth::user())) {
+            return $this->denyMaintenanceAccessResponse();
+        }
+
         $request->validate([
             'foto_correcao' => 'required|image|mimes:jpeg,png,jpg,webp|max:2048',
             'observacao_correcao' => 'nullable|string|max:1000',
@@ -606,7 +946,13 @@ class ManutencaoController extends Controller
 
     public function dataForPdf(VistoriaManutencao $vistoria)
     {
+        if (!$this->userCanAccessMaintenanceVistoria($vistoria, Auth::user())) {
+            return $this->denyMaintenanceAccessResponse();
+        }
+
         $vistoria->load(['agenda', 'fiscal', 'checklistItens']);
+        $vistoria->agenda?->setAttribute('motivo_vistoria_resolvido', $this->resolveMotivoVistoria($vistoria->agenda));
+
         return response()->json($vistoria);
     }
 
@@ -621,18 +967,28 @@ class ManutencaoController extends Controller
             return response()->json($validator->errors(), 422);
         }
 
-        $ids = VistoriaManutencao::query()
+        $query = VistoriaManutencao::query()
             ->whereBetween('created_at', [
                 $request->start_date . ' 00:00:00',
                 $request->end_date . ' 23:59:59',
-            ])
-            ->pluck('id');
+            ]);
+
+        $scopeError = $this->applyMaintenanceVisibilityScope($query, Auth::user());
+        if ($scopeError) {
+            return response()->json(['message' => $scopeError], 403);
+        }
+
+        $ids = $query->pluck('id');
 
         return response()->json($ids);
     }
 
     public function updateGantt(Request $request, AgendaManutencao $agenda)
     {
+        if (!$this->userCanAccessMaintenanceAgenda($agenda, Auth::user())) {
+            return response()->json(['message' => 'Nao autorizado para esta agenda de manutencao'], 403);
+        }
+
         $validated = $request->validate([
             'data_agendamento' => 'sometimes|required|date_format:Y-m-d',
             'fiscal_id' => 'sometimes|required|exists:users,id',
@@ -656,6 +1012,10 @@ class ManutencaoController extends Controller
 
     public function destroyAgenda(AgendaManutencao $agenda)
     {
+        if (!$this->userCanAccessMaintenanceAgenda($agenda, Auth::user())) {
+            return response()->json(['message' => 'Nao autorizado para esta agenda de manutencao'], 403);
+        }
+
         $agenda->delete();
 
         return response()->json(['message' => 'Agendamento de manutencao removido com sucesso.']);
@@ -665,12 +1025,32 @@ class ManutencaoController extends Controller
     {
         $request->validate(['date' => 'nullable|date_format:Y-m-d']);
         $date = $request->input('date') ? Carbon::parse($request->input('date')) : Carbon::today();
+        $user = Auth::user();
 
-        $fiscais = User::where('cargo_id', 3)->select('id', 'nome')->get();
+        $fiscaisQuery = User::where('cargo_id', 3)->select('id', 'nome');
+        if (!$this->isAdmin($user)) {
+            if ($user->regional_id) {
+                $fiscaisQuery->where('regional_id', $user->regional_id);
+            } else {
+                $fiscaisQuery->where('id', $user->id);
+            }
+        }
 
-        $agendamentos = AgendaManutencao::whereDate('data_agendamento', $date)
-            ->with('fiscal:id,nome')
-            ->get();
+        $fiscais = $fiscaisQuery->get();
+
+        $query = AgendaManutencao::whereDate('data_agendamento', $date)
+            ->with('fiscal:id,nome');
+
+        $scopeError = $this->applyMaintenanceAgendaVisibilityScope($query, $user);
+        if ($scopeError) {
+            return response()->json([
+                'resources' => [],
+                'tasks' => [],
+                'message' => $scopeError,
+            ], 403);
+        }
+
+        $agendamentos = $query->get();
 
         return response()->json([
             'resources' => $fiscais,
