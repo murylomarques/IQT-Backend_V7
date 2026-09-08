@@ -60,7 +60,7 @@ class ExportController extends Controller
 
     private function motivoVistoriaManutencao($agenda): string
     {
-        foreach ([$agenda?->motivo_vistoria, $agenda?->tipo_trabalho] as $value) {
+        foreach ([$agenda?->motivo_caso, $agenda?->motivo_vistoria, $agenda?->tipo_trabalho] as $value) {
             $motivo = $this->specificMotivoValue($value);
             if ($motivo !== null) {
                 return $motivo;

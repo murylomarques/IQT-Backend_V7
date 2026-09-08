@@ -32,6 +32,7 @@ class AgendaManutencao extends Model
         'nome_tecnico',
         'empresa_tecnico',
         'tipo_servico',
+        'motivo_caso',
         'motivo_vistoria',
         'tipo_trabalho',
         'status_caso',

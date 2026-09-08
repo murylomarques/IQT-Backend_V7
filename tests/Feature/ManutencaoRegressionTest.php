@@ -397,6 +397,53 @@ class ManutencaoRegressionTest extends TestCase
         $this->assertSame('N/A', $rows['SA-GENERICO']['Motivo']);
     }
 
+    public function test_motivo_caso_tem_prioridade_sobre_motivo_vistoria_e_tipo_trabalho(): void
+    {
+        $admin = $this->createUser('motivo-caso-admin@example.com', 1);
+        $this->createBaseManutencao([
+            'numero_compromisso' => 'SA-MOTIVO-CASO',
+            'tipo_servico' => 'Reparo',
+            'motivo_caso' => 'Rompimento de fibra',
+            'motivo_vistoria' => 'Queda de sinal',
+            'tipo_trabalho' => 'Reparo',
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $response = $this->getJson('/api/manutencao/atendimentos');
+
+        $response->assertOk();
+        $row = collect($response->json('data'))->firstWhere('NumeroCompromisso', 'SA-MOTIVO-CASO');
+
+        $this->assertSame('Rompimento de fibra', $row['Motivo']);
+    }
+
+    public function test_store_agenda_copia_motivo_caso_do_atendimento_original(): void
+    {
+        $admin = $this->createUser('store-agenda-admin@example.com', 1);
+        $atendimento = $this->createBaseManutencao([
+            'numero_compromisso' => 'SA-COPIA-MOTIVO',
+            'motivo_caso' => 'Rompimento de fibra',
+        ]);
+
+        Sanctum::actingAs($admin);
+
+        $response = $this->postJson('/api/manutencao/agenda', [
+            'atendimentoId' => $atendimento->id,
+            'fiscalId' => $admin->id,
+            'data' => now()->toDateString(),
+            'periodo' => 'Manha',
+            'agendado' => true,
+        ]);
+
+        $response->assertCreated();
+
+        $this->assertDatabaseHas('agenda_manutencao', [
+            'numero_compromisso' => 'SA-COPIA-MOTIVO',
+            'motivo_caso' => 'Rompimento de fibra',
+        ]);
+    }
+
     public function test_manutencao_export_is_forbidden_for_non_admin_users(): void
     {
         $user = $this->createUser('non-admin@example.com', 3);
@@ -561,6 +608,7 @@ class ManutencaoRegressionTest extends TestCase
             $table->string('nome_tecnico')->nullable();
             $table->string('empresa_tecnico')->nullable();
             $table->string('tipo_servico')->nullable();
+            $table->string('motivo_caso')->nullable();
             $table->string('motivo_vistoria')->nullable();
             $table->string('tipo_trabalho')->nullable();
             $table->string('status_caso')->nullable();
@@ -593,6 +641,7 @@ class ManutencaoRegressionTest extends TestCase
             $table->string('nome_tecnico')->nullable();
             $table->string('empresa_tecnico')->nullable();
             $table->string('tipo_servico')->nullable();
+            $table->string('motivo_caso')->nullable();
             $table->string('motivo_vistoria')->nullable();
             $table->string('tipo_trabalho')->nullable();
             $table->string('status_caso')->nullable();

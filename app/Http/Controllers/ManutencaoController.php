@@ -79,7 +79,7 @@ class ManutencaoController extends Controller
 
     private function resolveMotivoVistoria($source): string
     {
-        foreach ([$source?->motivo_vistoria, $source?->tipo_trabalho] as $value) {
+        foreach ([$source?->motivo_caso, $source?->motivo_vistoria, $source?->tipo_trabalho] as $value) {
             $reason = $this->specificReasonFromValue($value);
             if ($reason !== null) {
                 return $reason;
@@ -92,7 +92,7 @@ class ManutencaoController extends Controller
     private function formatMaintenanceAppointment($appointment)
     {
         $appointment->Motivo = $this->resolveMotivoVistoria($appointment);
-        unset($appointment->motivo_vistoria, $appointment->tipo_trabalho);
+        unset($appointment->motivo_caso, $appointment->motivo_vistoria, $appointment->tipo_trabalho);
 
         return $appointment;
     }
@@ -592,6 +592,7 @@ class ManutencaoController extends Controller
             'cto as CTO',
             'porta as Porta',
             'territorio as Territorio',
+            'motivo_caso',
             'motivo_vistoria',
             'tipo_trabalho'
         )
@@ -634,6 +635,7 @@ class ManutencaoController extends Controller
                 'cto as CTO',
                 'porta as Porta',
                 'territorio as Territorio',
+                'motivo_caso',
                 'motivo_vistoria',
                 'tipo_trabalho'
             )
@@ -703,6 +705,7 @@ class ManutencaoController extends Controller
                     'nome_tecnico' => $atendimentoOriginal->nome_tecnico,
                     'empresa_tecnico' => $atendimentoOriginal->empresa_tecnico,
                     'tipo_servico' => $atendimentoOriginal->tipo_servico ?: 'Manutencao',
+                    'motivo_caso' => $atendimentoOriginal->motivo_caso,
                     'motivo_vistoria' => $atendimentoOriginal->motivo_vistoria,
                     'tipo_trabalho' => $atendimentoOriginal->tipo_trabalho,
                     'status_caso' => $atendimentoOriginal->status_caso,
@@ -985,7 +988,7 @@ class ManutencaoController extends Controller
 
         $vistoria->load([
             'fiscal:id,nome',
-            'agenda:id,numero_compromisso,caso,nome_conta,endereco,nome_tecnico,empresa_tecnico,regional,city,motivo_vistoria,tipo_trabalho,tipo_servico',
+            'agenda:id,numero_compromisso,caso,nome_conta,endereco,nome_tecnico,empresa_tecnico,regional,city,motivo_caso,motivo_vistoria,tipo_trabalho,tipo_servico',
             'checklistItens',
         ]);
         $vistoria->agenda?->setAttribute('motivo_vistoria_resolvido', $this->resolveMotivoVistoria($vistoria->agenda));
