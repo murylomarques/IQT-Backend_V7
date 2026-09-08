@@ -427,6 +427,43 @@ class ManutencaoRegressionTest extends TestCase
         $this->assertStringContainsString('Queda de sinal', $response->streamedContent());
     }
 
+    public function test_assigned_fiscal_sees_and_accesses_agenda_regardless_of_territory(): void
+    {
+        $regional = Regional::create(['nome' => 'SUDESTE', 'uf' => 'SP']);
+        $fiscal = $this->createUser('fiscal-atribuido@example.com', 3, null, $regional);
+
+        // Agenda atribuida diretamente a esse fiscal, mas em territorio diferente do dele.
+        $assignedOutsideTerritory = $this->createAgendaManutencao([
+            'fiscal_id' => $fiscal->id,
+            'numero_compromisso' => 'SA-ATRIBUIDA',
+            'regional' => 'CENTRAL',
+            'territorio' => 'CENTRAL',
+            'data_agendamento' => now()->toDateString(),
+        ]);
+
+        // Agenda no territorio do fiscal, mas atribuida a outra pessoa.
+        $otherFiscal = $this->createUser('outro-fiscal@example.com', 3, null, $regional);
+        $this->createAgendaManutencao([
+            'fiscal_id' => $otherFiscal->id,
+            'numero_compromisso' => 'SA-OUTRO-FISCAL',
+            'regional' => 'SUDESTE',
+            'territorio' => 'SUDESTE',
+            'data_agendamento' => now()->toDateString(),
+        ]);
+
+        Sanctum::actingAs($fiscal);
+
+        $response = $this->getJson('/api/manutencao/agenda/minhas-vistorias-hoje');
+        $response->assertOk();
+        $ids = collect($response->json())->pluck('id')->all();
+
+        $this->assertContains($assignedOutsideTerritory->id, $ids);
+        $this->assertCount(1, $ids);
+
+        $this->getJson("/api/manutencao/agenda/{$assignedOutsideTerritory->id}")
+            ->assertOk();
+    }
+
     public function test_quality_backlog_still_uses_quality_tables_only(): void
     {
         $admin = $this->createUser('quality-admin@example.com', 1);

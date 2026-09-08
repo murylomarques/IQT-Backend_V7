@@ -272,8 +272,12 @@ class ManutencaoController extends Controller
             return true;
         }
 
-        if ($requireAssignment && (int) $agenda->fiscal_id !== (int) $user->id) {
-            return false;
+        if ($requireAssignment) {
+            // Atribuicao direta (fiscal_id) ja e suficiente: quem foi designado para
+            // a agenda pode abrir/realizar a vistoria dela, independente de territorio
+            // ou empresa — essas regras servem para visibilidade em listas (Backlog,
+            // agenda geral), nao para bloquear quem já foi explicitamente atribuido.
+            return (int) $agenda->fiscal_id === (int) $user->id;
         }
 
         if ($this->isTerritoryOnlyScopedManutencao($user)) {
@@ -740,16 +744,15 @@ class ManutencaoController extends Controller
 
     public function minhasVistoriasHoje()
     {
-        $query = AgendaManutencao::where('fiscal_id', Auth::id())
+        // Filtra direto por fiscal_id = usuario logado — atribuicao direta ja e a
+        // autorizacao (mesma regra de userCanAccessMaintenanceAgenda com requireAssignment).
+        // Nao aplica escopo de territorio/empresa aqui: quem foi atribuido a uma agenda
+        // deve conseguir realizar a vistoria dela, mesmo que o territorio/empresa dele
+        // nao bata (isso so importa para visibilidade ampla, como o Backlog).
+        $vistorias = AgendaManutencao::where('fiscal_id', Auth::id())
             ->whereDate('data_agendamento', Carbon::today())
-            ->orderBy('hora_agendamento', 'asc');
-
-        $scopeError = $this->applyMaintenanceAgendaVisibilityScope($query, Auth::user());
-        if ($scopeError) {
-            return response()->json(['message' => $scopeError], 403);
-        }
-
-        $vistorias = $query->get();
+            ->orderBy('hora_agendamento', 'asc')
+            ->get();
 
         return response()->json($vistorias);
     }
