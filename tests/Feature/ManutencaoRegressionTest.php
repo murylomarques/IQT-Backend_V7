@@ -14,8 +14,10 @@ use App\Models\VistoriaManutencao;
 use App\Models\VistoriaManutencaoChecklistItem;
 use Carbon\Carbon;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -210,6 +212,81 @@ class ManutencaoRegressionTest extends TestCase
 
         $this->getJson("/api/manutencao/vistorias/{$blocked->id}/data-pdf")
             ->assertForbidden();
+    }
+
+    public function test_proprio_manutencao_cargo_can_submit_correction_scoped_by_territory(): void
+    {
+        Storage::fake('public');
+
+        $regional = Regional::create(['nome' => 'SUDESTE', 'uf' => 'SP']);
+        $proprio = $this->createUser('proprio@example.com', 4, null, $regional);
+
+        $allowedAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $proprio->id,
+            'numero_compromisso' => 'SA-PROPRIO-IN',
+            'regional' => 'SUDESTE',
+            'territorio' => 'SUDESTE',
+        ]);
+        $blockedAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $proprio->id,
+            'numero_compromisso' => 'SA-PROPRIO-OUT',
+            'regional' => 'CENTRAL',
+            'territorio' => 'CENTRAL',
+        ]);
+
+        $allowed = $this->createVistoriaManutencao($allowedAgenda, $proprio);
+        $blocked = $this->createVistoriaManutencao($blockedAgenda, $proprio);
+        $allowedItem = $this->createItemManutencao($allowed);
+        $blockedItem = $this->createItemManutencao($blocked);
+
+        Sanctum::actingAs($proprio);
+
+        $this->post("/api/manutencao/checklist-itens/{$allowedItem->id}/resolver", [
+            'foto_correcao' => $this->fakeImageUpload('correcao.png'),
+        ])->assertOk();
+
+        $this->assertDatabaseHas('vistoria_manutencao_checklist_itens', [
+            'id' => $allowedItem->id,
+            'status_correcao' => 'Em Análise',
+        ]);
+
+        $this->post("/api/manutencao/checklist-itens/{$blockedItem->id}/resolver", [
+            'foto_correcao' => $this->fakeImageUpload('correcao2.png'),
+        ])->assertForbidden();
+    }
+
+    public function test_fiscal_manutencao_cargo_cannot_submit_correction(): void
+    {
+        Storage::fake('public');
+
+        $regional = Regional::create(['nome' => 'SUDESTE', 'uf' => 'SP']);
+        $fiscal = $this->createUser('fiscal-no-submit@example.com', 3, null, $regional);
+
+        $agenda = $this->createAgendaManutencao([
+            'fiscal_id' => $fiscal->id,
+            'numero_compromisso' => 'SA-FISCAL-NOSUBMIT',
+            'regional' => 'SUDESTE',
+            'territorio' => 'SUDESTE',
+        ]);
+        $vistoria = $this->createVistoriaManutencao($agenda, $fiscal);
+        $item = $this->createItemManutencao($vistoria);
+
+        Sanctum::actingAs($fiscal);
+
+        $this->post("/api/manutencao/checklist-itens/{$item->id}/resolver", [
+            'foto_correcao' => $this->fakeImageUpload('correcao.png'),
+        ])->assertForbidden();
+    }
+
+    private function fakeImageUpload(string $name): UploadedFile
+    {
+        // 1x1 PNG valido em bytes reais, para passar pela deteccao de mime (finfo)
+        // usada pelo EvidenceFileService sem depender da extensao GD.
+        $pngContents = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAAAAtJREFUCJlj+P//PwAI/AL+2Q3EMgAAAABJRU5ErkJggg=='
+        );
+
+        return UploadedFile::fake()->createWithContent($name, $pngContents);
     }
 
     public function test_manutencao_atendimentos_show_sa_reason_not_service_type(): void

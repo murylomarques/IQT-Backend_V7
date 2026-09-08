@@ -22,6 +22,7 @@ class ManutencaoController extends Controller
     private const ADMIN_CARGO_ID = 1;
     private const TERCEIRIZADO_CARGO_ID = 2;
     private const USUARIO_PROPRIO_CARGO_ID = 3;
+    private const PROPRIO_MANUTENCAO_CARGO_ID = 4;
     private const MAINTENANCE_SLA_HOURS = 72;
     private const GENERIC_MAINTENANCE_REASON_VALUES = [
         'manutencao',
@@ -153,6 +154,22 @@ class ManutencaoController extends Controller
         return (int) $user->cargo_id === self::USUARIO_PROPRIO_CARGO_ID;
     }
 
+    private function isProprioManutencao(User $user): bool
+    {
+        return (int) $user->cargo_id === self::PROPRIO_MANUTENCAO_CARGO_ID;
+    }
+
+    /**
+     * "Fiscal" (USUARIO_PROPRIO_CARGO_ID) e "Usuario Proprio" (PROPRIO_MANUTENCAO_CARGO_ID)
+     * compartilham o mesmo escopo de visibilidade: apenas pelo territorio do usuario.
+     * A diferenca entre os dois esta em userCanSubmitMaintenanceCorrection() — apenas o
+     * segundo pode enviar correcao/laudo, igual ao Terceirizado.
+     */
+    private function isTerritoryOnlyScopedManutencao(User $user): bool
+    {
+        return $this->isUsuarioProprioManutencao($user) || $this->isProprioManutencao($user);
+    }
+
     private function userMaintenanceTerritoryName(User $user): ?string
     {
         if (!$user->regional_id) {
@@ -201,7 +218,7 @@ class ManutencaoController extends Controller
             return false;
         }
 
-        if ($this->isUsuarioProprioManutencao($user)) {
+        if ($this->isTerritoryOnlyScopedManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
 
             return $territoryName !== null && $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
@@ -227,7 +244,7 @@ class ManutencaoController extends Controller
             return null;
         }
 
-        if ($this->isUsuarioProprioManutencao($user)) {
+        if ($this->isTerritoryOnlyScopedManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
             if (!$territoryName) {
                 return 'Usuario proprio sem territorio de manutencao vinculado';
@@ -269,7 +286,7 @@ class ManutencaoController extends Controller
             return null;
         }
 
-        if ($this->isUsuarioProprioManutencao($user)) {
+        if ($this->isTerritoryOnlyScopedManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
             if (!$territoryName) {
                 return 'Usuario proprio sem territorio de manutencao vinculado';
@@ -305,7 +322,7 @@ class ManutencaoController extends Controller
             return null;
         }
 
-        if ($this->isUsuarioProprioManutencao($user)) {
+        if ($this->isTerritoryOnlyScopedManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
             if (!$territoryName) {
                 return 'Usuario proprio sem territorio de manutencao vinculado';
@@ -344,7 +361,7 @@ class ManutencaoController extends Controller
         $vistoria->loadMissing('agenda');
         $agenda = $vistoria->agenda;
 
-        if ($this->isUsuarioProprioManutencao($user)) {
+        if ($this->isTerritoryOnlyScopedManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
 
             return $territoryName !== null && $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
@@ -368,7 +385,7 @@ class ManutencaoController extends Controller
     {
         $item->loadMissing('vistoria.agenda');
 
-        return ($this->isAdmin($user) || $this->isTerceirizado($user))
+        return ($this->isAdmin($user) || $this->isTerceirizado($user) || $this->isProprioManutencao($user))
             && $this->userCanAccessMaintenanceVistoria($item->vistoria, $user);
     }
 
