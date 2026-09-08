@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 // ==========================================================
 use App\Models\Cargo;
 use App\Models\Empresa;
+use App\Models\Regional;
 // ==========================================================
 
 
@@ -70,6 +71,14 @@ class User extends Authenticatable
     public function empresa(): BelongsTo
     {
         return $this->belongsTo(Empresa::class, 'empresa_id');
+    }
+
+    /**
+     * Relação: um Usuário pertence a uma Regional (território).
+     */
+    public function regional(): BelongsTo
+    {
+        return $this->belongsTo(Regional::class, 'regional_id');
     }
 
     public function supervisor(): BelongsTo

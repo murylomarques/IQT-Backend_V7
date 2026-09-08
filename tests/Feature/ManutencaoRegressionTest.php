@@ -62,9 +62,7 @@ class ManutencaoRegressionTest extends TestCase
         $response = $this->getJson('/api/manutencao/vistorias/backlog');
 
         $response->assertOk();
-        $response->assertJsonPath('tableData.0.id', $vistoria->id);
-        $response->assertJsonPath('tableData.0.sla', 'Vencido');
-        $response->assertJsonPath('tableData.0.statusLaudo', 'Vencido');
+        $response->assertJsonCount(0, 'tableData');
         $response->assertJsonPath('kpiData.slaVencido', 1);
         $this->assertDatabaseHas('vistorias_manutencao', [
             'id' => $vistoria->id,
@@ -110,9 +108,13 @@ class ManutencaoRegressionTest extends TestCase
 
         $this->assertSame('No Prazo', $table[$under->id]['sla']);
         $this->assertSame('Pendente', $table[$under->id]['statusLaudo']);
-        $this->assertSame('Vencido', $table[$over->id]['sla']);
-        $this->assertSame('Vencido', $table[$over->id]['statusLaudo']);
+        $this->assertFalse($table->has($over->id));
         $this->assertFalse($table->has($finalizado->id));
+        $response->assertJsonPath('kpiData.slaVencido', 1);
+        $this->assertDatabaseHas('vistorias_manutencao', [
+            'id' => $over->id,
+            'status_laudo' => 'Vencido',
+        ]);
     }
 
     public function test_manutencao_backlog_does_not_expose_retorno_tecnico(): void
@@ -299,6 +301,23 @@ class ManutencaoRegressionTest extends TestCase
         $response->assertJsonPath('tableData.0.protocolo', 'SA-QUAL');
     }
 
+    public function test_user_list_exposes_assigned_regional_for_territory_management(): void
+    {
+        $admin = $this->createUser('territorio-admin@example.com', 1);
+        $regional = Regional::create(['nome' => 'SUDESTE', 'uf' => 'SP']);
+        $fiscal = $this->createUser('territorio-fiscal@example.com', 3, null, $regional);
+
+        Sanctum::actingAs($admin);
+
+        $response = $this->getJson('/api/users');
+
+        $response->assertOk();
+        $user = collect($response->json())->firstWhere('id', $fiscal->id);
+
+        $this->assertEquals($regional->id, $user['regional_id']);
+        $this->assertSame('SUDESTE', $user['regional']['nome'] ?? null);
+    }
+
     private function createSchema(): void
     {
         Schema::create('empresas', function (Blueprint $table): void {
@@ -313,6 +332,12 @@ class ManutencaoRegressionTest extends TestCase
             $table->id();
             $table->string('nome');
             $table->string('uf', 2);
+            $table->timestamps();
+        });
+
+        Schema::create('cargos', function (Blueprint $table): void {
+            $table->id();
+            $table->string('nome');
             $table->timestamps();
         });
 

@@ -788,7 +788,7 @@ class ManutencaoController extends Controller
 
         $query = VistoriaManutencao::query()
             ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'resultado_final', 'status_laudo', 'created_at'])
-            ->where('status_laudo', '!=', 'Finalizado')
+            ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
             ->withCount([
                 'checklistItens as itens_nao_conformes' => function (Builder $q) {
                     $this->applyIssueFilter($q);
@@ -805,9 +805,11 @@ class ManutencaoController extends Controller
             ]);
 
         $concluidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Finalizado');
+        $vencidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Vencido');
 
         $scopeError = $this->applyMaintenanceVisibilityScope($query, $user)
-            ?? $this->applyMaintenanceVisibilityScope($concluidosQuery, $user);
+            ?? $this->applyMaintenanceVisibilityScope($concluidosQuery, $user)
+            ?? $this->applyMaintenanceVisibilityScope($vencidosQuery, $user);
 
         if ($scopeError) {
             return response()->json([
@@ -865,7 +867,7 @@ class ManutencaoController extends Controller
             'tableData' => $formattedData,
             'kpiData' => [
                 'totalBacklog' => $formattedData->count(),
-                'slaVencido' => $formattedData->where('sla', 'Vencido')->count(),
+                'slaVencido' => $vencidosQuery->count(),
                 'concluidos' => $concluidosQuery->count(),
             ],
         ]);
