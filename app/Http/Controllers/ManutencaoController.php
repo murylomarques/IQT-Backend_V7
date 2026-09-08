@@ -236,6 +236,36 @@ class ManutencaoController extends Controller
         return $this->normalizeScopeValue($agenda?->territorio) === $this->normalizeScopeValue($territorioValue);
     }
 
+    /**
+     * Territorio (territorio_manutencao) tem prioridade: se estiver preenchido, e o UNICO
+     * criterio usado (Regional e ignorada). Regional so entra em jogo quando o usuario nao
+     * tem territorio_manutencao definido — mantendo compatibilidade com quem so usa Regional.
+     */
+    private function applyMaintenanceTerritoryScope(Builder $query, ?string $territoryName, ?string $territorioValue): void
+    {
+        if ($territorioValue !== null) {
+            $this->applyAgendaTerritorioColumnFilter($query, $territorioValue);
+            return;
+        }
+
+        if ($territoryName !== null) {
+            $this->applyAgendaTerritoryFilter($query, $territoryName);
+        }
+    }
+
+    private function agendaMatchesMaintenanceScope($agenda, ?string $territoryName, ?string $territorioValue): bool
+    {
+        if ($territorioValue !== null) {
+            return $this->agendaMatchesMaintenanceTerritorio($agenda, $territorioValue);
+        }
+
+        if ($territoryName !== null) {
+            return $this->agendaMatchesMaintenanceTerritory($agenda, $territoryName);
+        }
+
+        return false;
+    }
+
     private function userCanAccessMaintenanceAgenda(AgendaManutencao $agenda, User $user, bool $requireAssignment = false): bool
     {
         if ($this->isAdmin($user)) {
@@ -253,14 +283,8 @@ class ManutencaoController extends Controller
             if ($territoryName === null && $territorioValue === null) {
                 return false;
             }
-            if ($territoryName !== null && !$this->agendaMatchesMaintenanceTerritory($agenda, $territoryName)) {
-                return false;
-            }
-            if ($territorioValue !== null && !$this->agendaMatchesMaintenanceTerritorio($agenda, $territorioValue)) {
-                return false;
-            }
 
-            return true;
+            return $this->agendaMatchesMaintenanceScope($agenda, $territoryName, $territorioValue);
         }
 
         if ($this->isTerceirizado($user)) {
@@ -270,16 +294,13 @@ class ManutencaoController extends Controller
             }
 
             $territoryName = $this->userMaintenanceTerritoryName($user);
-            if ($territoryName !== null && !$this->agendaMatchesMaintenanceTerritory($agenda, $territoryName)) {
-                return false;
-            }
-
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
-            if ($territorioValue !== null && !$this->agendaMatchesMaintenanceTerritorio($agenda, $territorioValue)) {
-                return false;
+
+            if ($territoryName === null && $territorioValue === null) {
+                return true;
             }
 
-            return true;
+            return $this->agendaMatchesMaintenanceScope($agenda, $territoryName, $territorioValue);
         }
 
         return false;
@@ -298,16 +319,9 @@ class ManutencaoController extends Controller
                 return 'Usuario proprio sem territorio de manutencao vinculado';
             }
 
-            if ($territoryName !== null) {
-                $query->whereHas('agenda', function (Builder $q) use ($territoryName) {
-                    $this->applyAgendaTerritoryFilter($q, $territoryName);
-                });
-            }
-            if ($territorioValue !== null) {
-                $query->whereHas('agenda', function (Builder $q) use ($territorioValue) {
-                    $this->applyAgendaTerritorioColumnFilter($q, $territorioValue);
-                });
-            }
+            $query->whereHas('agenda', function (Builder $q) use ($territoryName, $territorioValue) {
+                $this->applyMaintenanceTerritoryScope($q, $territoryName, $territorioValue);
+            });
 
             return null;
         }
@@ -323,16 +337,10 @@ class ManutencaoController extends Controller
             });
 
             $territoryName = $this->userMaintenanceTerritoryName($user);
-            if ($territoryName) {
-                $query->whereHas('agenda', function (Builder $q) use ($territoryName) {
-                    $this->applyAgendaTerritoryFilter($q, $territoryName);
-                });
-            }
-
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
-            if ($territorioValue) {
-                $query->whereHas('agenda', function (Builder $q) use ($territorioValue) {
-                    $this->applyAgendaTerritorioColumnFilter($q, $territorioValue);
+            if ($territoryName !== null || $territorioValue !== null) {
+                $query->whereHas('agenda', function (Builder $q) use ($territoryName, $territorioValue) {
+                    $this->applyMaintenanceTerritoryScope($q, $territoryName, $territorioValue);
                 });
             }
 
@@ -355,12 +363,7 @@ class ManutencaoController extends Controller
                 return 'Usuario proprio sem territorio de manutencao vinculado';
             }
 
-            if ($territoryName !== null) {
-                $this->applyAgendaTerritoryFilter($query, $territoryName);
-            }
-            if ($territorioValue !== null) {
-                $this->applyAgendaTerritorioColumnFilter($query, $territorioValue);
-            }
+            $this->applyMaintenanceTerritoryScope($query, $territoryName, $territorioValue);
 
             return null;
         }
@@ -374,13 +377,9 @@ class ManutencaoController extends Controller
             $query->where('empresa_tecnico', $empresaNome);
 
             $territoryName = $this->userMaintenanceTerritoryName($user);
-            if ($territoryName) {
-                $this->applyAgendaTerritoryFilter($query, $territoryName);
-            }
-
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
-            if ($territorioValue) {
-                $this->applyAgendaTerritorioColumnFilter($query, $territorioValue);
+            if ($territoryName !== null || $territorioValue !== null) {
+                $this->applyMaintenanceTerritoryScope($query, $territoryName, $territorioValue);
             }
 
             return null;
@@ -402,12 +401,7 @@ class ManutencaoController extends Controller
                 return 'Usuario proprio sem territorio de manutencao vinculado';
             }
 
-            if ($territoryName !== null) {
-                $this->applyAgendaTerritoryFilter($query, $territoryName);
-            }
-            if ($territorioValue !== null) {
-                $this->applyAgendaTerritorioColumnFilter($query, $territorioValue);
-            }
+            $this->applyMaintenanceTerritoryScope($query, $territoryName, $territorioValue);
 
             return null;
         }
@@ -421,13 +415,9 @@ class ManutencaoController extends Controller
             $query->where('empresa_tecnico', $empresaNome);
 
             $territoryName = $this->userMaintenanceTerritoryName($user);
-            if ($territoryName) {
-                $this->applyAgendaTerritoryFilter($query, $territoryName);
-            }
-
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
-            if ($territorioValue) {
-                $this->applyAgendaTerritorioColumnFilter($query, $territorioValue);
+            if ($territoryName !== null || $territorioValue !== null) {
+                $this->applyMaintenanceTerritoryScope($query, $territoryName, $territorioValue);
             }
 
             return null;
@@ -452,14 +442,8 @@ class ManutencaoController extends Controller
             if ($territoryName === null && $territorioValue === null) {
                 return false;
             }
-            if ($territoryName !== null && !$this->agendaMatchesMaintenanceTerritory($agenda, $territoryName)) {
-                return false;
-            }
-            if ($territorioValue !== null && !$this->agendaMatchesMaintenanceTerritorio($agenda, $territorioValue)) {
-                return false;
-            }
 
-            return true;
+            return $this->agendaMatchesMaintenanceScope($agenda, $territoryName, $territorioValue);
         }
 
         if ($this->isTerceirizado($user)) {
@@ -469,16 +453,13 @@ class ManutencaoController extends Controller
             }
 
             $territoryName = $this->userMaintenanceTerritoryName($user);
-            if ($territoryName !== null && !$this->agendaMatchesMaintenanceTerritory($agenda, $territoryName)) {
-                return false;
-            }
-
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
-            if ($territorioValue !== null && !$this->agendaMatchesMaintenanceTerritorio($agenda, $territorioValue)) {
-                return false;
+
+            if ($territoryName === null && $territorioValue === null) {
+                return true;
             }
 
-            return true;
+            return $this->agendaMatchesMaintenanceScope($agenda, $territoryName, $territorioValue);
         }
 
         return false;

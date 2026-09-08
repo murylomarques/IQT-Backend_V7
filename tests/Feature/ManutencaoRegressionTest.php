@@ -247,30 +247,41 @@ class ManutencaoRegressionTest extends TestCase
         $this->assertNotContains($outside->id, $ids);
     }
 
-    public function test_usuario_scoped_by_regional_and_territorio_requires_both_to_match(): void
+    public function test_territorio_manutencao_takes_precedence_over_regional_when_both_are_set(): void
     {
+        // Regional aponta para "CLUSTER CAMPINAS", mas o usuario tambem tem
+        // territorio_manutencao preenchido com "TERRITORIO CAMPINAS". Quando os dois
+        // estao preenchidos, so o territorio decide — a Regional e ignorada nesse caso,
+        // entao uma agenda de outro cluster (Hortolandia) que compartilha o mesmo
+        // territorio tambem deve aparecer.
         $regional = Regional::create(['nome' => 'CLUSTER CAMPINAS', 'uf' => 'SP']);
         $user = $this->createUser('regional-e-territorio@example.com', 4, null, $regional, 'TERRITORIO CAMPINAS');
 
-        $bothMatchAgenda = $this->createAgendaManutencao([
+        $sameClusterAgenda = $this->createAgendaManutencao([
             'fiscal_id' => $user->id,
-            'numero_compromisso' => 'SA-AMBOS-OK',
+            'numero_compromisso' => 'SA-MESMO-CLUSTER',
             'regional' => 'CLUSTER CAMPINAS',
             'territorio' => 'TERRITORIO CAMPINAS',
         ]);
-        // Mesmo territorio, mas regional diferente (outro cluster) — deve ficar de fora
-        // quando o usuario tem os dois campos preenchidos (match precisa ser dos dois).
-        $onlyTerritorioMatchesAgenda = $this->createAgendaManutencao([
+        $otherClusterSameTerritorioAgenda = $this->createAgendaManutencao([
             'fiscal_id' => $user->id,
-            'numero_compromisso' => 'SA-SO-TERRITORIO',
+            'numero_compromisso' => 'SA-OUTRO-CLUSTER',
             'regional' => 'CLUSTER HORTOLANDIA',
             'territorio' => 'TERRITORIO CAMPINAS',
         ]);
+        $otherTerritorioAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $user->id,
+            'numero_compromisso' => 'SA-OUTRO-TERRITORIO',
+            'regional' => 'CLUSTER CAMPINAS',
+            'territorio' => 'TERRITORIO SOROCABA',
+        ]);
 
-        $bothMatch = $this->createVistoriaManutencao($bothMatchAgenda, $user);
-        $onlyTerritorioMatches = $this->createVistoriaManutencao($onlyTerritorioMatchesAgenda, $user);
-        $this->createItemManutencao($bothMatch);
-        $this->createItemManutencao($onlyTerritorioMatches);
+        $sameCluster = $this->createVistoriaManutencao($sameClusterAgenda, $user);
+        $otherClusterSameTerritorio = $this->createVistoriaManutencao($otherClusterSameTerritorioAgenda, $user);
+        $otherTerritorio = $this->createVistoriaManutencao($otherTerritorioAgenda, $user);
+        $this->createItemManutencao($sameCluster);
+        $this->createItemManutencao($otherClusterSameTerritorio);
+        $this->createItemManutencao($otherTerritorio);
 
         Sanctum::actingAs($user);
 
@@ -279,8 +290,9 @@ class ManutencaoRegressionTest extends TestCase
         $response->assertOk();
         $ids = collect($response->json('tableData'))->pluck('id')->all();
 
-        $this->assertContains($bothMatch->id, $ids);
-        $this->assertNotContains($onlyTerritorioMatches->id, $ids);
+        $this->assertContains($sameCluster->id, $ids);
+        $this->assertContains($otherClusterSameTerritorio->id, $ids);
+        $this->assertNotContains($otherTerritorio->id, $ids);
     }
 
     public function test_proprio_manutencao_cargo_can_submit_correction_scoped_by_territory(): void
