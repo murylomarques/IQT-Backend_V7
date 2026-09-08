@@ -38,6 +38,7 @@ class UserController extends Controller
             'empresa_id' => 'nullable|exists:empresas,id',
             'cargo_id' => 'nullable|exists:cargos,id',
             'regional_id' => 'nullable|exists:regionais,id',
+            'territorio_manutencao' => 'nullable|string|max:255',
             // Adicione outras validações para 'numero', 'cpf', etc., se necessário
         ]);
 
@@ -82,6 +83,7 @@ class UserController extends Controller
             'empresa_id' => 'nullable|exists:empresas,id',
             'cargo_id' => 'nullable|exists:cargos,id',
             'regional_id' => 'nullable|exists:regionais,id',
+            'territorio_manutencao' => 'nullable|string|max:255',
         ]);
 
         // Se uma nova senha for fornecida, valida e criptografa

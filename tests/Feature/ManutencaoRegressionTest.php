@@ -214,6 +214,75 @@ class ManutencaoRegressionTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_usuario_sees_backlog_scoped_by_territorio_manutencao_alone(): void
+    {
+        $user = $this->createUser('territorio-only@example.com', 4, null, null, 'TERRITORIO CAMPINAS');
+
+        $insideAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $user->id,
+            'numero_compromisso' => 'SA-TERRITORIO-IN',
+            'regional' => 'CLUSTER CAMPINAS',
+            'territorio' => 'TERRITORIO CAMPINAS',
+        ]);
+        $outsideAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $user->id,
+            'numero_compromisso' => 'SA-TERRITORIO-OUT',
+            'regional' => 'CLUSTER SOROCABA',
+            'territorio' => 'TERRITORIO SOROCABA',
+        ]);
+
+        $inside = $this->createVistoriaManutencao($insideAgenda, $user);
+        $outside = $this->createVistoriaManutencao($outsideAgenda, $user);
+        $this->createItemManutencao($inside);
+        $this->createItemManutencao($outside);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/manutencao/vistorias/backlog');
+
+        $response->assertOk();
+        $ids = collect($response->json('tableData'))->pluck('id')->all();
+
+        $this->assertContains($inside->id, $ids);
+        $this->assertNotContains($outside->id, $ids);
+    }
+
+    public function test_usuario_scoped_by_regional_and_territorio_requires_both_to_match(): void
+    {
+        $regional = Regional::create(['nome' => 'CLUSTER CAMPINAS', 'uf' => 'SP']);
+        $user = $this->createUser('regional-e-territorio@example.com', 4, null, $regional, 'TERRITORIO CAMPINAS');
+
+        $bothMatchAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $user->id,
+            'numero_compromisso' => 'SA-AMBOS-OK',
+            'regional' => 'CLUSTER CAMPINAS',
+            'territorio' => 'TERRITORIO CAMPINAS',
+        ]);
+        // Mesmo territorio, mas regional diferente (outro cluster) — deve ficar de fora
+        // quando o usuario tem os dois campos preenchidos (match precisa ser dos dois).
+        $onlyTerritorioMatchesAgenda = $this->createAgendaManutencao([
+            'fiscal_id' => $user->id,
+            'numero_compromisso' => 'SA-SO-TERRITORIO',
+            'regional' => 'CLUSTER HORTOLANDIA',
+            'territorio' => 'TERRITORIO CAMPINAS',
+        ]);
+
+        $bothMatch = $this->createVistoriaManutencao($bothMatchAgenda, $user);
+        $onlyTerritorioMatches = $this->createVistoriaManutencao($onlyTerritorioMatchesAgenda, $user);
+        $this->createItemManutencao($bothMatch);
+        $this->createItemManutencao($onlyTerritorioMatches);
+
+        Sanctum::actingAs($user);
+
+        $response = $this->getJson('/api/manutencao/vistorias/backlog');
+
+        $response->assertOk();
+        $ids = collect($response->json('tableData'))->pluck('id')->all();
+
+        $this->assertContains($bothMatch->id, $ids);
+        $this->assertNotContains($onlyTerritorioMatches->id, $ids);
+    }
+
     public function test_proprio_manutencao_cargo_can_submit_correction_scoped_by_territory(): void
     {
         Storage::fake('public');
@@ -428,6 +497,7 @@ class ManutencaoRegressionTest extends TestCase
             $table->unsignedBigInteger('empresa_id')->nullable();
             $table->unsignedBigInteger('cargo_id')->nullable();
             $table->unsignedBigInteger('regional_id')->nullable();
+            $table->string('territorio_manutencao')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });
@@ -571,7 +641,8 @@ class ManutencaoRegressionTest extends TestCase
         string $email,
         int $cargoId,
         ?Empresa $empresa = null,
-        ?Regional $regional = null
+        ?Regional $regional = null,
+        ?string $territorioManutencao = null
     ): User {
         $empresa ??= Empresa::create(['nome' => 'Empresa ' . $cargoId]);
 
@@ -583,6 +654,7 @@ class ManutencaoRegressionTest extends TestCase
             'empresa_id' => $empresa->id,
             'cargo_id' => $cargoId,
             'regional_id' => $regional?->id,
+            'territorio_manutencao' => $territorioManutencao,
         ]);
     }
 

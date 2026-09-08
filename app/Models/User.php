@@ -39,6 +39,7 @@ class User extends Authenticatable
         'empresa_id',
         'cargo_id',
         'regional_id',
+        'territorio_manutencao',
     ];
 
     /**
