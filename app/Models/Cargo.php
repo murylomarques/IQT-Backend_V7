@@ -11,6 +11,10 @@ class Cargo extends Model
 
     protected $table = 'cargos';
 
+    protected $fillable = [
+        'nome',
+    ];
+
     /**
      * Define a relação inversa: Um Cargo pode ter vários Usuários.
      */
