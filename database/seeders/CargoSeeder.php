@@ -20,6 +20,7 @@ class CargoSeeder extends Seeder
             ['nome' => 'Administrador'], // Corrigido de "Adiministrador"
             ['nome' => 'Terceirizado'],  // Alterado para um termo mais comum
             ['nome' => 'Fiscal'],
+            ['nome' => 'Supervisor de Manutenção'],
         ]);
     }
 }

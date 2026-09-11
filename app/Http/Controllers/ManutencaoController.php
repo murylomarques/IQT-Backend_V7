@@ -197,18 +197,39 @@ class ManutencaoController extends Controller
         return preg_replace('/[\s_-]+/', '', strtolower(Str::ascii(trim((string) $value)))) ?? '';
     }
 
-    private function applyAgendaTerritoryFilter(Builder $query, string $territoryName): Builder
+    private function scopeComparisonValues(string $value): array
     {
-        $normalizedTerritory = $this->normalizeScopeValue($territoryName);
+        $trimmed = trim($value);
+        $ascii = Str::ascii($trimmed);
+        $territorioAccentVariant = str_replace('TERRITORIO', 'TERRITÓRIO', strtoupper($ascii));
 
-        return $query->where(function (Builder $q) use ($normalizedTerritory) {
-            foreach (['regional', 'territorio'] as $column) {
+        return array_values(array_unique(array_filter([
+            $trimmed,
+            $ascii,
+            $territorioAccentVariant,
+        ], fn ($candidate) => trim((string) $candidate) !== '')));
+    }
+
+    private function applyAgendaScopeColumnFilter(Builder $query, array $columns, string $value): Builder
+    {
+        $normalized = $this->normalizeScopeValue($value);
+        $exactValues = $this->scopeComparisonValues($value);
+
+        return $query->where(function (Builder $q) use ($columns, $normalized, $exactValues) {
+            foreach ($columns as $column) {
                 $q->orWhereRaw(
                     "LOWER(REPLACE(REPLACE(REPLACE(COALESCE({$column}, ''), ' ', ''), '_', ''), '-', '')) = ?",
-                    [$normalizedTerritory]
+                    [$normalized]
                 );
+
+                $q->orWhereIn($column, $exactValues);
             }
         });
+    }
+
+    private function applyAgendaTerritoryFilter(Builder $query, string $territoryName): Builder
+    {
+        return $this->applyAgendaScopeColumnFilter($query, ['regional', 'territorio'], $territoryName);
     }
 
     private function agendaMatchesMaintenanceTerritory($agenda, string $territoryName): bool
@@ -223,12 +244,7 @@ class ManutencaoController extends Controller
 
     private function applyAgendaTerritorioColumnFilter(Builder $query, string $territorioValue): Builder
     {
-        $normalized = $this->normalizeScopeValue($territorioValue);
-
-        return $query->whereRaw(
-            "LOWER(REPLACE(REPLACE(REPLACE(COALESCE(territorio, ''), ' ', ''), '_', ''), '-', '')) = ?",
-            [$normalized]
-        );
+        return $this->applyAgendaScopeColumnFilter($query, ['territorio'], $territorioValue);
     }
 
     private function agendaMatchesMaintenanceTerritorio($agenda, string $territorioValue): bool

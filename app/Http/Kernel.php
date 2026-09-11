@@ -73,5 +73,6 @@ class Kernel extends HttpKernel
         'monitor.magic'   => \App\Http\Middleware\MonitorMagicLink::class,
         'moavi.auth'      => \App\Http\Middleware\MoaviBearerAuth::class,
         'tsp.auth'        => \App\Http\Middleware\TspBearerAuth::class,
+        'maintenance.only' => \App\Http\Middleware\MaintenanceOnlyAccess::class,
     ];
 }

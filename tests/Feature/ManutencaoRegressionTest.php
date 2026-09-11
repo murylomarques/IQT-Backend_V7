@@ -216,19 +216,19 @@ class ManutencaoRegressionTest extends TestCase
 
     public function test_usuario_sees_backlog_scoped_by_territorio_manutencao_alone(): void
     {
-        $user = $this->createUser('territorio-only@example.com', 4, null, null, 'TERRITORIO CAMPINAS');
+        $user = $this->createUser('territorio-only@example.com', 4, null, null, 'TERRITÓRIO CAMPINAS');
 
         $insideAgenda = $this->createAgendaManutencao([
             'fiscal_id' => $user->id,
             'numero_compromisso' => 'SA-TERRITORIO-IN',
             'regional' => 'CLUSTER CAMPINAS',
-            'territorio' => 'TERRITORIO CAMPINAS',
+            'territorio' => 'TERRITÓRIO CAMPINAS',
         ]);
         $outsideAgenda = $this->createAgendaManutencao([
             'fiscal_id' => $user->id,
             'numero_compromisso' => 'SA-TERRITORIO-OUT',
             'regional' => 'CLUSTER SOROCABA',
-            'territorio' => 'TERRITORIO SOROCABA',
+            'territorio' => 'TERRITÓRIO SOROCABA',
         ]);
 
         $inside = $this->createVistoriaManutencao($insideAgenda, $user);
@@ -293,6 +293,20 @@ class ManutencaoRegressionTest extends TestCase
         $this->assertContains($sameCluster->id, $ids);
         $this->assertContains($otherClusterSameTerritorio->id, $ids);
         $this->assertNotContains($otherTerritorio->id, $ids);
+    }
+
+    public function test_proprio_manutencao_can_only_access_maintenance_api_routes(): void
+    {
+        $user = $this->createUser('maintenance-only@example.com', 4, null, null, 'TERRITORIO CAMPINAS');
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/manutencao/vistorias/backlog')
+            ->assertOk();
+
+        $this->getJson('/api/vistorias/backlog')
+            ->assertForbidden()
+            ->assertJsonPath('message', 'Perfil autorizado apenas para vistorias de manutencao.');
     }
 
     public function test_proprio_manutencao_cargo_can_submit_correction_scoped_by_territory(): void

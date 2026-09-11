@@ -110,7 +110,7 @@ Route::middleware('api')->group(function () {
     });
 
     // Rotas protegidas que exigem autenticacao
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'maintenance.only'])->group(function () {
         Route::get('/vistorias/ids-por-periodo', [VistoriaController::class, 'getIdsByDateRange']);
         Route::get('/atendimentos', [AtendimentoController::class, 'index']);
         Route::get('/atendimentos/{id}', [AtendimentoController::class, 'show']);
