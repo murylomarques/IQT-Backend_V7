@@ -178,35 +178,53 @@ class FcaFormController extends Controller
     public function exportAnalyticsAll(Request $req)
     {
         $payload = $this->analyticsAllPayload($req);
+        $period = $payload['period'] ?? null;
 
         $lines = [];
         $lines[] = $this->csvLine([
-            'id',
-            'name',
-            'email',
-            'role',
-            'manager_id',
-            'supervisor_id',
-            'supervisor_name',
-            'supervisor_email',
-            'supervisor_role',
+            'Coordenador',
+            'Supervisor',
+            'Regional',
+            'Tecnico',
+            'Situacao',
+            'Checklist',
+            'PO',
+            'Inicio',
+            'Base subiu',
+            'Fim',
+            'Datas Checklist',
+            'Datas PO',
         ]);
 
         foreach (($payload['supervisors'] ?? []) as $supervisor) {
             foreach (($supervisor['tecnicos'] ?? []) as $tecnico) {
-                $tecnicoUser = $tecnico['tecnico_user'] ?? null;
-                $supervisorData = $tecnico['supervisor'] ?? null;
+                $coordenador = $tecnico['coordenador']['name'] ?? $supervisor['coordenador']['name'] ?? '-';
+                $regional = $tecnico['regional'] ?? $supervisor['regional'] ?? '-';
+
+                $checklistDates = collect($tecnico['checklist_dates'] ?? [])
+                    ->values()
+                    ->map(fn($item, $idx) => ($idx + 1) . '. ' . $this->fmtDateTime($item['performed_at'] ?? $item['created_at'] ?? null))
+                    ->implode(' | ');
+
+                $poDates = collect($tecnico['po_dates'] ?? [])
+                    ->values()
+                    ->map(fn($item, $idx) => ($idx + 1) . '. ' . $this->fmtDate($item['performed_at'] ?? $item['po_date'] ?? null)
+                        . ' (' . $this->fmtDateTime($item['created_at'] ?? null) . ')')
+                    ->implode(' | ');
 
                 $lines[] = $this->csvLine([
-                    $tecnicoUser['id'] ?? $tecnico['tecnico_user_id'] ?? $tecnico['id'] ?? '',
-                    $tecnicoUser['name'] ?? $tecnico['nome'] ?? '',
-                    $tecnicoUser['email'] ?? '',
-                    $tecnicoUser['role'] ?? 'tecnico',
-                    $tecnicoUser['manager_id'] ?? ($supervisorData['id'] ?? ''),
-                    $supervisorData['id'] ?? '',
-                    $supervisorData['name'] ?? '',
-                    $supervisorData['email'] ?? '',
-                    $supervisorData['role'] ?? '',
+                    $coordenador,
+                    $supervisor['name'] ?? '',
+                    $regional,
+                    $tecnico['nome'] ?? '',
+                    $tecnico['status_label'] ?? $this->statusLabel($tecnico['status'] ?? null),
+                    ($tecnico['checklist_count'] ?? 0) . '/' . ($tecnico['required_checklists'] ?? 0),
+                    ($tecnico['po_progress'] ?? 0) . '/' . ($tecnico['required_pos'] ?? 0),
+                    $this->fmtDate($tecnico['period_started_at'] ?? $period['starts_at'] ?? null),
+                    $this->fmtDate($tecnico['base_uploaded_at'] ?? $period['base_uploaded_at'] ?? null),
+                    $this->fmtDate($tecnico['period_ends_at'] ?? $period['ends_at'] ?? null),
+                    $checklistDates !== '' ? $checklistDates : '-',
+                    $poDates !== '' ? $poDates : '-',
                 ]);
             }
         }
@@ -215,6 +233,20 @@ class FcaFormController extends Controller
             'Content-Type'        => 'text/csv; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="fca_extracao_' . now()->format('Ymd') . '.csv"',
         ]);
+    }
+
+    private function fmtDate($value): string
+    {
+        if (!$value) return '-';
+        $date = $value instanceof \Carbon\Carbon ? $value : \Carbon\Carbon::parse($value);
+        return $date->format('d/m/Y');
+    }
+
+    private function fmtDateTime($value): string
+    {
+        if (!$value) return '-';
+        $date = $value instanceof \Carbon\Carbon ? $value : \Carbon\Carbon::parse($value);
+        return $date->format('d/m/Y H:i');
     }
 
     private function analyticsAllPayload(Request $req): array
