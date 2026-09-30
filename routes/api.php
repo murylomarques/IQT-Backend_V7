@@ -237,12 +237,12 @@ Route::middleware('api')->group(function () {
 
         // ── FCA Form (checklist / PO) ──────────────────────────────────────
         Route::get('/fcaf/period/active',    [FcaFormController::class, 'activePeriod']);
-        Route::get('/fcaf/periods',          [FcaFormController::class, 'periodHistory'])->middleware('fca.admin_or_consulta');
+        Route::get('/fcaf/periods',          [FcaFormController::class, 'periodHistory'])->middleware('fca.analytics_viewer');
         Route::post('/fcaf/period/upload',   [FcaFormController::class, 'uploadBase'])->middleware('fca.admin');
         Route::get('/fcaf/tecnicos',         [FcaFormController::class, 'myTecnicos']);
         Route::get('/fcaf/analytics',        [FcaFormController::class, 'analytics']);
-        Route::get('/fcaf/analytics/all',    [FcaFormController::class, 'analyticsAll'])->middleware('fca.admin_or_consulta');
-        Route::get('/fcaf/analytics/all/export', [FcaFormController::class, 'exportAnalyticsAll'])->middleware('fca.admin_or_consulta');
+        Route::get('/fcaf/analytics/all',    [FcaFormController::class, 'analyticsAll'])->middleware('fca.analytics_viewer');
+        Route::get('/fcaf/analytics/all/export', [FcaFormController::class, 'exportAnalyticsAll'])->middleware('fca.analytics_viewer');
         Route::get('/fcaf/tecnico/{id}',     [FcaFormController::class, 'tecnicoDetail']);
 
         Route::get('/fcaf/tecnico/{id}/checklist', [FcaChecklistController::class, 'getForTecnico']);

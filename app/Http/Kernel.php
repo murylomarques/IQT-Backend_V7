@@ -70,6 +70,7 @@ class Kernel extends HttpKernel
         'fca.admin'       => \App\Http\Middleware\FcaAdmin::class,
         'fca.admin_or_consulta' => \App\Http\Middleware\FcaAdminOrConsulta::class,
         'fca.supervisor'  => \App\Http\Middleware\FcaSupervisor::class,
+        'fca.analytics_viewer' => \App\Http\Middleware\FcaAnalyticsViewer::class,
         'monitor.magic'   => \App\Http\Middleware\MonitorMagicLink::class,
         'moavi.auth'      => \App\Http\Middleware\MoaviBearerAuth::class,
         'tsp.auth'        => \App\Http\Middleware\TspBearerAuth::class,

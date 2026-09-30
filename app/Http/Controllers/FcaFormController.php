@@ -268,7 +268,10 @@ class FcaFormController extends Controller
             ->get()
             ->keyBy(fn($t) => $this->normalizeName($t->nome));
 
+        $scopeManagerIds = $this->hierarchyManagerIds($req);
+
         $supervisors = FcaUser::where('role', 'supervisao')
+            ->when($scopeManagerIds !== null, fn($q) => $q->whereIn('manager_id', $scopeManagerIds))
             ->with('manager:id,name,role,regional,territory')
             ->orderBy('name')
             ->get();
@@ -451,6 +454,30 @@ class FcaFormController extends Controller
         ];
     }
 
+    /**
+     * IDs dos gestores cujos supervisores o usuario pode ver.
+     * null = sem restricao (admin/consulta).
+     */
+    private function hierarchyManagerIds(Request $req): ?array
+    {
+        $user = $req->attributes->get('fca_user');
+
+        if ($user?->role === 'coordenacao') {
+            return [$user->id];
+        }
+
+        if ($user?->role === 'gerente') {
+            $coordIds = FcaUser::where('manager_id', $user->id)
+                ->where('role', 'coordenacao')
+                ->pluck('id')
+                ->all();
+
+            return array_merge([$user->id], $coordIds);
+        }
+
+        return null;
+    }
+
     private function resolvePeriod(Request $req): ?FcaPeriod
     {
         if ($req->filled('period_id')) {
@@ -496,12 +523,15 @@ class FcaFormController extends Controller
 
     private function filterPayload(Request $req): array
     {
+        $scopeManagerIds = $this->hierarchyManagerIds($req);
+
         return [
             'selected_period_id' => $req->query('period_id'),
             'selected_regional' => $req->query('regional'),
             'selected_status' => $req->query('status'),
             'regionals' => FcaUser::whereNotNull('regional')
                 ->where('regional', '<>', '')
+                ->when($scopeManagerIds !== null, fn($q) => $q->where('role', 'supervisao')->whereIn('manager_id', $scopeManagerIds))
                 ->distinct()
                 ->orderBy('regional')
                 ->pluck('regional')
