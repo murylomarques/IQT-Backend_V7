@@ -111,7 +111,7 @@ class ManutencaoController extends Controller
                         ->where('status', 'Sim');
                 })
                 ->orWhere(function (Builder $sub) {
-                    $sub->where('item_key', 'cliente_satisfeito_atendimento')
+                    $sub->whereIn('item_key', ['cliente_satisfeito_atendimento', 'drop_identificado_anilha'])
                         ->whereIn('status', $this->getNaoValues());
                 });
         });
@@ -130,7 +130,7 @@ class ManutencaoController extends Controller
             return true;
         }
 
-        return $key === 'cliente_satisfeito_atendimento'
+        return in_array($key, ['cliente_satisfeito_atendimento', 'drop_identificado_anilha'], true)
             && $normalizedStatus === 'nao';
     }
 
@@ -168,6 +168,25 @@ class ManutencaoController extends Controller
     private function isTerritoryOnlyScopedManutencao(User $user): bool
     {
         return $this->isUsuarioProprioManutencao($user) || $this->isProprioManutencao($user);
+    }
+
+    /**
+     * Backlog de manutencao: Usuario Proprio e Terceirizado enxergam apenas as vistorias
+     * da propria empresa (empresa do usuario == empresa_tecnico da agenda), sem filtro de territorio.
+     */
+    private function isEmpresaScopedManutencao(User $user): bool
+    {
+        return $this->isTerceirizado($user) || $this->isProprioManutencao($user);
+    }
+
+    private function agendaMatchesUserEmpresa($agenda, User $user): bool
+    {
+        $empresaNome = $user->empresa?->nome ?? null;
+        if (!$empresaNome) {
+            return false;
+        }
+
+        return $this->normalizeScopeValue($agenda?->empresa_tecnico) === $this->normalizeScopeValue($empresaNome);
     }
 
     private function userMaintenanceTerritoryName(User $user): ?string
@@ -332,7 +351,20 @@ class ManutencaoController extends Controller
             return null;
         }
 
-        if ($this->isTerritoryOnlyScopedManutencao($user)) {
+        if ($this->isEmpresaScopedManutencao($user)) {
+            $empresaNome = $user->empresa?->nome ?? null;
+            if (!$empresaNome) {
+                return 'Usuario sem empresa vinculada';
+            }
+
+            $query->whereHas('agenda', function (Builder $q) use ($empresaNome) {
+                $this->applyAgendaScopeColumnFilter($q, ['empresa_tecnico'], $empresaNome);
+            });
+
+            return null;
+        }
+
+        if ($this->isUsuarioProprioManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
             if ($territoryName === null && $territorioValue === null) {
@@ -342,27 +374,6 @@ class ManutencaoController extends Controller
             $query->whereHas('agenda', function (Builder $q) use ($territoryName, $territorioValue) {
                 $this->applyMaintenanceTerritoryScope($q, $territoryName, $territorioValue);
             });
-
-            return null;
-        }
-
-        if ($this->isTerceirizado($user)) {
-            $empresaNome = $user->empresa?->nome ?? null;
-            if (!$empresaNome) {
-                return 'Usuario sem empresa vinculada';
-            }
-
-            $query->whereHas('agenda', function (Builder $q) use ($empresaNome) {
-                $q->where('empresa_tecnico', $empresaNome);
-            });
-
-            $territoryName = $this->userMaintenanceTerritoryName($user);
-            $territorioValue = $this->userMaintenanceTerritorioValue($user);
-            if ($territoryName !== null || $territorioValue !== null) {
-                $query->whereHas('agenda', function (Builder $q) use ($territoryName, $territorioValue) {
-                    $this->applyMaintenanceTerritoryScope($q, $territoryName, $territorioValue);
-                });
-            }
 
             return null;
         }
@@ -455,28 +466,16 @@ class ManutencaoController extends Controller
         $vistoria->loadMissing('agenda');
         $agenda = $vistoria->agenda;
 
-        if ($this->isTerritoryOnlyScopedManutencao($user)) {
-            $territoryName = $this->userMaintenanceTerritoryName($user);
-            $territorioValue = $this->userMaintenanceTerritorioValue($user);
-
-            if ($territoryName === null && $territorioValue === null) {
-                return false;
-            }
-
-            return $this->agendaMatchesMaintenanceScope($agenda, $territoryName, $territorioValue);
+        if ($this->isEmpresaScopedManutencao($user)) {
+            return $this->agendaMatchesUserEmpresa($agenda, $user);
         }
 
-        if ($this->isTerceirizado($user)) {
-            $empresaNome = $user->empresa?->nome ?? null;
-            if (!$empresaNome || ($agenda?->empresa_tecnico ?? null) !== $empresaNome) {
-                return false;
-            }
-
+        if ($this->isUsuarioProprioManutencao($user)) {
             $territoryName = $this->userMaintenanceTerritoryName($user);
             $territorioValue = $this->userMaintenanceTerritorioValue($user);
 
             if ($territoryName === null && $territorioValue === null) {
-                return true;
+                return false;
             }
 
             return $this->agendaMatchesMaintenanceScope($agenda, $territoryName, $territorioValue);
@@ -903,6 +902,132 @@ class ManutencaoController extends Controller
         }
     }
 
+    private function backlogCounts(): array
+    {
+        return [
+            'checklistItens as itens_nao_conformes' => function (Builder $q) {
+                $this->applyIssueFilter($q);
+            },
+            'checklistItens as itens_reprovados' => function (Builder $q) {
+                $this->applyIssueFilter($q)->where('status_correcao', 'Reprovado');
+            },
+            'checklistItens as itens_em_analise' => function (Builder $q) {
+                $this->applyIssueFilter($q)->where('status_correcao', 'Em Análise');
+            },
+            'checklistItens as itens_pendentes_resposta' => function (Builder $q) {
+                $this->applyIssueFilter($q)->where('status_correcao', 'Pendente');
+            },
+        ];
+    }
+
+    private function formatBacklogRow(VistoriaManutencao $vistoria): array
+    {
+        $dataLaudo = $vistoria->created_at?->format('Y-m-d H:i');
+        $deadline = $vistoria->created_at?->copy()->addHours(self::MAINTENANCE_SLA_HOURS);
+        $slaStatus = ($vistoria->status_laudo === 'Vencido' || ($deadline && now()->gte($deadline))) ? 'Vencido' : 'No Prazo';
+
+        $correcaoStatus = 'Sem pendencia';
+        if (($vistoria->itens_em_analise ?? 0) > 0) {
+            $correcaoStatus = 'Respondido (em analise)';
+        } elseif (($vistoria->itens_reprovados ?? 0) > 0 || ($vistoria->itens_pendentes_resposta ?? 0) > 0) {
+            $correcaoStatus = 'Aguardando resposta';
+        } elseif (($vistoria->itens_nao_conformes ?? 0) > 0) {
+            $correcaoStatus = 'Aguardando resposta';
+        }
+
+        return [
+            'id' => $vistoria->id,
+            'regional' => $vistoria->agenda?->regional ?? 'N/A',
+            'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
+            'tecnico' => $vistoria->agenda?->nome_tecnico ?? 'N/A',
+            'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
+            'supervisor' => 'N/A',
+            'protocolo' => $vistoria->agenda?->numero_compromisso ?? $vistoria->agenda?->caso ?? 'N/A',
+            'territorio' => $vistoria->agenda?->territorio ?? $vistoria->agenda?->regional ?? 'N/A',
+            'cidade' => $vistoria->agenda?->city ?? 'N/A',
+            'cliente' => $vistoria->agenda?->nome_conta ?? 'N/A',
+            'data' => $dataLaudo,
+            'dataSla' => $deadline?->format('Y-m-d H:i'),
+            'sla' => $slaStatus,
+            'statusLaudo' => $vistoria->status_laudo,
+            'resultadoFinal' => $vistoria->resultado_final,
+            'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
+            'correcaoStatus' => $correcaoStatus,
+        ];
+    }
+
+    /**
+     * Historico de vistorias de manutencao (inclusive Finalizadas e Vencidas) para consulta do admin.
+     * Filtros: status (fechadas|abertas|todas|<status_laudo>), start_date, end_date, q (ID, SA, cliente, tecnico).
+     */
+    public function historico(Request $request)
+    {
+        if (!$this->isAdmin(Auth::user())) {
+            return response()->json(['message' => 'Consulta de historico permitida apenas para administrador.'], 403);
+        }
+
+        $validated = $request->validate([
+            'status' => 'nullable|string|max:40',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+            'q' => 'nullable|string|max:120',
+            'limit' => 'nullable|integer|min:1|max:1000',
+        ]);
+
+        $this->markOverdueBacklogItems();
+
+        $limit = (int) ($validated['limit'] ?? 300);
+        $status = $validated['status'] ?? 'fechadas';
+        $term = trim((string) ($validated['q'] ?? ''));
+
+        $query = VistoriaManutencao::query()
+            ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'resultado_final', 'status_laudo', 'created_at'])
+            ->withCount($this->backlogCounts());
+
+        if ($status === 'fechadas') {
+            $query->whereIn('status_laudo', ['Finalizado', 'Vencido']);
+        } elseif ($status === 'abertas') {
+            $query->whereNotIn('status_laudo', ['Finalizado', 'Vencido']);
+        } elseif ($status !== 'todas') {
+            $query->where('status_laudo', $status);
+        }
+
+        if (!empty($validated['start_date'])) {
+            $query->where('created_at', '>=', Carbon::parse($validated['start_date'])->startOfDay());
+        }
+        if (!empty($validated['end_date'])) {
+            $query->where('created_at', '<=', Carbon::parse($validated['end_date'])->endOfDay());
+        }
+
+        if ($term !== '') {
+            $like = '%' . $term . '%';
+            $query->where(function (Builder $q) use ($term, $like) {
+                if (ctype_digit($term)) {
+                    $q->orWhere('id', (int) $term);
+                }
+                $q->orWhereHas('agenda', function (Builder $a) use ($like) {
+                    $a->where('numero_compromisso', 'like', $like)
+                        ->orWhere('caso', 'like', $like)
+                        ->orWhere('nome_conta', 'like', $like)
+                        ->orWhere('nome_tecnico', 'like', $like);
+                });
+            });
+        }
+
+        $total = (clone $query)->count();
+
+        $vistorias = $query->with([
+            'fiscal:id,nome,empresa_id',
+            'agenda:id,numero_compromisso,caso,empresa_tecnico,nome_tecnico,nome_conta,territorio,regional,city,created_at',
+        ])->latest()->limit($limit)->get();
+
+        return response()->json([
+            'tableData' => $vistorias->map(fn ($vistoria) => $this->formatBacklogRow($vistoria))->values(),
+            'total' => $total,
+            'truncated' => $total > $limit,
+        ]);
+    }
+
     public function backlog()
     {
         $this->markOverdueBacklogItems();
@@ -912,20 +1037,7 @@ class ManutencaoController extends Controller
         $query = VistoriaManutencao::query()
             ->select(['id', 'agenda_manutencao_id', 'fiscal_id', 'resultado_final', 'status_laudo', 'created_at'])
             ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
-            ->withCount([
-                'checklistItens as itens_nao_conformes' => function (Builder $q) {
-                    $this->applyIssueFilter($q);
-                },
-                'checklistItens as itens_reprovados' => function (Builder $q) {
-                    $this->applyIssueFilter($q)->where('status_correcao', 'Reprovado');
-                },
-                'checklistItens as itens_em_analise' => function (Builder $q) {
-                    $this->applyIssueFilter($q)->where('status_correcao', 'Em Análise');
-                },
-                'checklistItens as itens_pendentes_resposta' => function (Builder $q) {
-                    $this->applyIssueFilter($q)->where('status_correcao', 'Pendente');
-                },
-            ]);
+            ->withCount($this->backlogCounts());
 
         $concluidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Finalizado');
         $vencidosQuery = VistoriaManutencao::query()->where('status_laudo', 'Vencido');
@@ -949,42 +1061,10 @@ class ManutencaoController extends Controller
         $vistorias = $query->with([
             'fiscal:id,nome,empresa_id',
             'fiscal.empresa:id,nome',
-            'agenda:id,numero_compromisso,caso,empresa_tecnico,nome_tecnico,territorio,regional,city,created_at',
+            'agenda:id,numero_compromisso,caso,empresa_tecnico,nome_tecnico,nome_conta,territorio,regional,city,created_at',
         ])->latest()->get();
 
-        $formattedData = $vistorias->map(function ($vistoria) {
-            $dataLaudo = $vistoria->created_at?->format('Y-m-d H:i');
-            $deadline = $vistoria->created_at?->copy()->addHours(self::MAINTENANCE_SLA_HOURS);
-            $slaStatus = ($vistoria->status_laudo === 'Vencido' || ($deadline && now()->gte($deadline))) ? 'Vencido' : 'No Prazo';
-
-            $correcaoStatus = 'Sem pendencia';
-            if (($vistoria->itens_em_analise ?? 0) > 0) {
-                $correcaoStatus = 'Respondido (em analise)';
-            } elseif (($vistoria->itens_reprovados ?? 0) > 0 || ($vistoria->itens_pendentes_resposta ?? 0) > 0) {
-                $correcaoStatus = 'Aguardando resposta';
-            } elseif (($vistoria->itens_nao_conformes ?? 0) > 0) {
-                $correcaoStatus = 'Aguardando resposta';
-            }
-
-            return [
-                'id' => $vistoria->id,
-                'regional' => $vistoria->agenda?->regional ?? 'N/A',
-                'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
-                'tecnico' => $vistoria->agenda?->nome_tecnico ?? 'N/A',
-                'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
-                'supervisor' => 'N/A',
-                'protocolo' => $vistoria->agenda?->numero_compromisso ?? $vistoria->agenda?->caso ?? 'N/A',
-                'territorio' => $vistoria->agenda?->territorio ?? $vistoria->agenda?->regional ?? 'N/A',
-                'cidade' => $vistoria->agenda?->city ?? 'N/A',
-                'data' => $dataLaudo,
-                'dataSla' => $deadline?->format('Y-m-d H:i'),
-                'sla' => $slaStatus,
-                'statusLaudo' => $vistoria->status_laudo,
-                'resultadoFinal' => $vistoria->resultado_final,
-                'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
-                'correcaoStatus' => $correcaoStatus,
-            ];
-        });
+        $formattedData = $vistorias->map(fn ($vistoria) => $this->formatBacklogRow($vistoria));
 
         return response()->json([
             'tableData' => $formattedData,

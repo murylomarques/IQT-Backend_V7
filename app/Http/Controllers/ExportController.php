@@ -453,14 +453,18 @@ class ExportController extends Controller
         $endDate   = Carbon::parse($validated['end_date'])->endOfDay();
 
         $checklistKeys = [
+            'drop_novo',
             'drop_novo_sem_reutilizacao',
             'conectores_opticos_novos_adequados',
             'cto_porta_cavidade_correta',
             'drop_acomodado_aneis',
             'drop_fixado_hellermann',
+            'drop_identificado_anilha',
             'poste_saida_equipado_padrao',
             'catenaria_drop_ancorada_padrao',
             'postes_passagem_equipados_padrao',
+            'postes_passagem_equipados_padrao_2',
+            'postes_passagem_equipados_padrao_3',
             'trajeto_drop_ramal_normas',
             'ptr_devidamente_equipado',
             'riscos_qualidade_interrupcao',

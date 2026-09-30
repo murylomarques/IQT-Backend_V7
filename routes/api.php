@@ -131,6 +131,7 @@ Route::middleware('api')->group(function () {
             Route::post('/agenda', [ManutencaoController::class, 'storeAgenda']);
             Route::delete('/agenda/{agenda}', [ManutencaoController::class, 'destroyAgenda']);
             Route::get('/vistorias/backlog', [ManutencaoController::class, 'backlog']);
+            Route::get('/vistorias/historico', [ManutencaoController::class, 'historico']);
             Route::get('/vistorias/ids-por-periodo', [ManutencaoController::class, 'getIdsByDateRange']);
             Route::get('/vistorias/{vistoria}/data-pdf', [ManutencaoController::class, 'dataForPdf']);
             Route::get('/vistorias/{vistoria}', [ManutencaoController::class, 'showVistoria']);
@@ -146,6 +147,7 @@ Route::middleware('api')->group(function () {
 
         // Rotas de Vistoria
         Route::get('/vistorias/backlog', [VistoriaController::class, 'backlog']);
+        Route::get('/vistorias/historico', [VistoriaController::class, 'historico']);
         Route::get('/vistorias/{vistoria}', [VistoriaController::class, 'show']);
 
         // Rotas de Correcao

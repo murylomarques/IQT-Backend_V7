@@ -7,6 +7,7 @@ use App\Models\Vistoria;
 use App\Models\VistoriaChecklistItem;
 use App\Services\ActivityLogService;
 use App\Services\EvidenceFileService;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -150,6 +151,134 @@ class VistoriaController extends Controller
         }
     }
 
+    private function backlogCounts(): array
+    {
+        $naoConformeValues = $this->getNaoConformeValues();
+
+        return [
+            'checklistItens as itens_nao_conformes' => function ($q) use ($naoConformeValues) {
+                $q->whereIn('status', $naoConformeValues);
+            },
+            'checklistItens as itens_reprovados' => function ($q) use ($naoConformeValues) {
+                $q->whereIn('status', $naoConformeValues)
+                  ->where('status_correcao', 'Reprovado');
+            },
+            'checklistItens as itens_em_analise' => function ($q) use ($naoConformeValues) {
+                $q->whereIn('status', $naoConformeValues)
+                  ->whereIn('status_correcao', $this->getEmAnaliseStatusCandidates());
+            },
+            'checklistItens as itens_pendentes_resposta' => function ($q) use ($naoConformeValues) {
+                $q->whereIn('status', $naoConformeValues)
+                  ->where('status_correcao', 'Pendente');
+            },
+        ];
+    }
+
+    private function formatBacklogRow(Vistoria $vistoria): array
+    {
+        $dataLaudo = $vistoria->created_at?->toDateString();
+        $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
+        $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5)))
+            ? 'Vencido'
+            : 'No Prazo';
+
+        $correcaoStatus = 'Sem pendencia';
+        if (($vistoria->itens_em_analise ?? 0) > 0) {
+            $correcaoStatus = 'Respondido (em analise)';
+        } elseif (($vistoria->itens_reprovados ?? 0) > 0 || ($vistoria->itens_pendentes_resposta ?? 0) > 0) {
+            $correcaoStatus = 'Aguardando resposta';
+        } elseif (($vistoria->itens_nao_conformes ?? 0) > 0) {
+            $correcaoStatus = 'Aguardando resposta';
+        }
+
+        return [
+            'id' => $vistoria->id,
+            'regional' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
+            'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
+            'tecnico' => $vistoria->agenda?->nome_tecnico ?? 'N/A',
+            'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
+            'supervisor' => 'N/A',
+            'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
+            'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
+            'cliente' => $vistoria->agenda?->nome_conta ?? 'N/A',
+            'data' => $dataLaudo,
+            'dataSla' => $dataSla,
+            'sla' => $slaStatus,
+            'statusLaudo' => $vistoria->status_laudo,
+            'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
+            'correcaoStatus' => $correcaoStatus,
+        ];
+    }
+
+    /**
+     * Historico de vistorias de qualidade (inclusive Finalizadas e Vencidas) para consulta do admin.
+     * Filtros: status (fechadas|abertas|todas|<status_laudo>), start_date, end_date, q (ID, SA, cliente, tecnico).
+     */
+    public function historico(Request $request)
+    {
+        if ((int) Auth::user()?->cargo_id !== 1) {
+            return response()->json(['message' => 'Consulta de historico permitida apenas para administrador.'], 403);
+        }
+
+        $validated = $request->validate([
+            'status' => 'nullable|string|max:40',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d|after_or_equal:start_date',
+            'q' => 'nullable|string|max:120',
+            'limit' => 'nullable|integer|min:1|max:1000',
+        ]);
+
+        $limit = (int) ($validated['limit'] ?? 300);
+        $status = $validated['status'] ?? 'fechadas';
+        $term = trim((string) ($validated['q'] ?? ''));
+
+        $query = Vistoria::query()
+            ->select(['id', 'agenda_id', 'fiscal_id', 'status_laudo', 'created_at'])
+            ->withCount($this->backlogCounts());
+
+        if ($status === 'fechadas') {
+            $query->whereIn('status_laudo', ['Finalizado', 'Vencido']);
+        } elseif ($status === 'abertas') {
+            $query->whereNotIn('status_laudo', ['Finalizado', 'Vencido']);
+        } elseif ($status !== 'todas') {
+            $query->where('status_laudo', $status);
+        }
+
+        if (!empty($validated['start_date'])) {
+            $query->where('created_at', '>=', Carbon::parse($validated['start_date'])->startOfDay());
+        }
+        if (!empty($validated['end_date'])) {
+            $query->where('created_at', '<=', Carbon::parse($validated['end_date'])->endOfDay());
+        }
+
+        if ($term !== '') {
+            $like = '%' . $term . '%';
+            $query->where(function ($q) use ($term, $like) {
+                if (ctype_digit($term)) {
+                    $q->orWhere('id', (int) $term);
+                }
+                $q->orWhereHas('agenda', function ($a) use ($like) {
+                    $a->where('numero_compromisso', 'like', $like)
+                        ->orWhere('nome_conta', 'like', $like)
+                        ->orWhere('nome_tecnico', 'like', $like);
+                });
+            });
+        }
+
+        $total = (clone $query)->count();
+
+        $vistorias = $query->with([
+            'fiscal:id,nome,empresa_id',
+            'agenda:id,numero_compromisso,empresa_tecnico,nome_tecnico,nome_conta,territorio,created_at',
+        ])->latest()->limit($limit)->get();
+
+        return response()->json([
+            'tableData' => $vistorias->map(fn ($vistoria) => $this->formatBacklogRow($vistoria))->values(),
+            'total' => $total,
+            'truncated' => $total > $limit,
+        ]);
+    }
+
     /**
      * Retorna a lista de vistorias com inconformidades para a tela de backlog.
      */
@@ -162,23 +291,7 @@ class VistoriaController extends Controller
         $query = Vistoria::query()
             ->select(['id', 'agenda_id', 'fiscal_id', 'status_laudo', 'created_at'])
             ->whereNotIn('status_laudo', ['Finalizado', 'Vencido'])
-            ->withCount([
-                'checklistItens as itens_nao_conformes' => function ($q) use ($naoConformeValues) {
-                    $q->whereIn('status', $naoConformeValues);
-                },
-                'checklistItens as itens_reprovados' => function ($q) use ($naoConformeValues) {
-                    $q->whereIn('status', $naoConformeValues)
-                      ->where('status_correcao', 'Reprovado');
-                },
-                'checklistItens as itens_em_analise' => function ($q) use ($naoConformeValues) {
-                    $q->whereIn('status', $naoConformeValues)
-                      ->whereIn('status_correcao', $this->getEmAnaliseStatusCandidates());
-                },
-                'checklistItens as itens_pendentes_resposta' => function ($q) use ($naoConformeValues) {
-                    $q->whereIn('status', $naoConformeValues)
-                      ->where('status_correcao', 'Pendente');
-                },
-            ]);
+            ->withCount($this->backlogCounts());
 
         $concluidosQuery = Vistoria::query()->where('status_laudo', 'Finalizado');
 
@@ -207,42 +320,10 @@ class VistoriaController extends Controller
         $vistorias = $query->with([
             'fiscal:id,nome,empresa_id',
             'fiscal.empresa:id,nome',
-            'agenda:id,numero_compromisso,empresa_tecnico,nome_tecnico,territorio,created_at',
+            'agenda:id,numero_compromisso,empresa_tecnico,nome_tecnico,nome_conta,territorio,created_at',
         ])->latest()->get();
 
-        $formattedData = $vistorias->map(function ($vistoria) {
-            $dataLaudo = $vistoria->created_at?->toDateString();
-            $dataSla = $vistoria->created_at?->copy()->addDays(5)?->toDateString();
-            $slaStatus = ($vistoria->created_at && now()->gt($vistoria->created_at->copy()->addDays(5)))
-                ? 'Vencido'
-                : 'No Prazo';
-
-            $correcaoStatus = 'Sem pendencia';
-            if (($vistoria->itens_em_analise ?? 0) > 0) {
-                $correcaoStatus = 'Respondido (em analise)';
-            } elseif (($vistoria->itens_reprovados ?? 0) > 0 || ($vistoria->itens_pendentes_resposta ?? 0) > 0) {
-                $correcaoStatus = 'Aguardando resposta';
-            } elseif (($vistoria->itens_nao_conformes ?? 0) > 0) {
-                $correcaoStatus = 'Aguardando resposta';
-            }
-
-            return [
-                'id' => $vistoria->id,
-                'regional' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
-                'empresa' => $vistoria->agenda?->empresa_tecnico ?? 'N/A',
-                'tecnico' => $vistoria->agenda?->nome_tecnico ?? 'N/A',
-                'fiscal' => $vistoria->fiscal?->nome ?? 'N/A',
-                'supervisor' => 'N/A',
-                'protocolo' => $vistoria->agenda?->numero_compromisso ?? 'N/A',
-                'territorio' => $vistoria->agenda?->territorio ?? 'N/A',
-                'data' => $dataLaudo,
-                'dataSla' => $dataSla,
-                'sla' => $slaStatus,
-                'statusLaudo' => $vistoria->status_laudo,
-                'reprovada' => ($vistoria->itens_reprovados ?? 0) > 0,
-                'correcaoStatus' => $correcaoStatus,
-            ];
-        });
+        $formattedData = $vistorias->map(fn ($vistoria) => $this->formatBacklogRow($vistoria));
 
         $kpiData = [
             'totalBacklog' => $formattedData->count(),
