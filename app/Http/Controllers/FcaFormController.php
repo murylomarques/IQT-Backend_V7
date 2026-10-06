@@ -188,12 +188,10 @@ class FcaFormController extends Controller
             'Tecnico',
             'Situacao',
             'Checklist',
-            'PO',
             'Inicio',
             'Base subiu',
             'Fim',
             'Datas Checklist',
-            'Datas PO',
         ]);
 
         foreach (($payload['supervisors'] ?? []) as $supervisor) {
@@ -206,12 +204,6 @@ class FcaFormController extends Controller
                     ->map(fn($item, $idx) => ($idx + 1) . '. ' . $this->fmtDateTime($item['performed_at'] ?? $item['created_at'] ?? null))
                     ->implode(' | ');
 
-                $poDates = collect($tecnico['po_dates'] ?? [])
-                    ->values()
-                    ->map(fn($item, $idx) => ($idx + 1) . '. ' . $this->fmtDate($item['performed_at'] ?? $item['po_date'] ?? null)
-                        . ' (' . $this->fmtDateTime($item['created_at'] ?? null) . ')')
-                    ->implode(' | ');
-
                 $lines[] = $this->csvLine([
                     $coordenador,
                     $supervisor['name'] ?? '',
@@ -219,12 +211,10 @@ class FcaFormController extends Controller
                     $tecnico['nome'] ?? '',
                     $tecnico['status_label'] ?? $this->statusLabel($tecnico['status'] ?? null),
                     ($tecnico['checklist_count'] ?? 0) . '/' . ($tecnico['required_checklists'] ?? 0),
-                    ($tecnico['po_progress'] ?? 0) . '/' . ($tecnico['required_pos'] ?? 0),
                     $this->fmtDate($tecnico['period_started_at'] ?? $period['starts_at'] ?? null),
                     $this->fmtDate($tecnico['base_uploaded_at'] ?? $period['base_uploaded_at'] ?? null),
                     $this->fmtDate($tecnico['period_ends_at'] ?? $period['ends_at'] ?? null),
                     $checklistDates !== '' ? $checklistDates : '-',
-                    $poDates !== '' ? $poDates : '-',
                 ]);
             }
         }
@@ -371,10 +361,9 @@ class FcaFormController extends Controller
             : null;
 
         $checklistMet = $checklistCount >= $requiredPos;
-        $poMet = $poProgress >= $requiredPos && $poCount >= min($checklistCount, $requiredPos);
-        $isComplete = $checklistMet && $poMet;
+        $isComplete = $checklistMet;
         $isExpired = $period->isExpired();
-        $started = $checklistCount > 0 || $poCount > 0;
+        $started = $checklistCount > 0;
 
         if ($isComplete) {
             $status = 'realizado';
@@ -390,11 +379,7 @@ class FcaFormController extends Controller
             && $checklistCount < $requiredPos
             && (!$nextChecklistAt || now()->greaterThanOrEqualTo($nextChecklistAt));
 
-        $canCreatePo = !$isExpired
-            && $checklistCount > 0
-            && $poCount < $requiredPos
-            && $poCount < $checklistCount
-            && (!$nextPoAt || now()->greaterThanOrEqualTo($nextPoAt));
+        $canCreatePo = false;
 
         return [
             'id'            => $t->id,
@@ -424,7 +409,7 @@ class FcaFormController extends Controller
             'status'        => $status,
             'status_label'  => $this->statusLabel($status),
             'started'       => $started,
-            'progress_text' => "{$checklistCount}/{$requiredPos} Checklists, {$poProgress}/{$requiredPos} POs",
+            'progress_text' => "{$checklistCount}/{$requiredPos} Checklists",
             'period_started_at' => $period->created_at,
             'base_uploaded_at' => $period->created_at,
             'period_ends_at' => $period->expires_at,

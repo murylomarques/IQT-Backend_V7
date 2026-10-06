@@ -249,7 +249,6 @@ Route::middleware('api')->group(function () {
         Route::post('/fcaf/checklist',             [FcaChecklistController::class, 'store'])->middleware('fca.supervisor');
 
         Route::get('/fcaf/tecnico/{id}/pos',  [FcaPoController::class, 'getForTecnico']);
-        Route::post('/fcaf/po',               [FcaPoController::class, 'store'])->middleware('fca.supervisor');
     });
 
 });

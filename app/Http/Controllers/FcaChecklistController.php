@@ -48,6 +48,16 @@ class FcaChecklistController extends Controller
         $req->validate([
             'tecnico_id' => 'required|exists:fca_period_tecnicos,id',
             'answers' => 'required|array|min:1',
+            'answers.*' => 'required|array',
+            'answers.*.answer' => ['required', 'string', function ($attribute, $value, $fail) use ($req) {
+                $index = explode('.', $attribute)[1];
+                if ($req->input("answers.{$index}.section") === 'SA') {
+                    if (mb_strlen($value) > 255) $fail('O numero da SA pode ter no maximo 255 caracteres.');
+                } elseif (!in_array($value, ['NA', 'PRO', 'PMR', 'OK', 'ME'], true)) {
+                    $fail('Selecione NA, PRO, PMR, OK ou ME.');
+                }
+            }],
+            'answers.*.observation' => 'nullable|string',
         ]);
 
         $period = FcaPeriod::where('is_active', true)->latest()->first();
