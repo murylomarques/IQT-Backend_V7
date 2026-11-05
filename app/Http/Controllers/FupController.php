@@ -118,6 +118,13 @@ class FupController extends Controller
                 $snap[self::day($r[0])]["$e,$t"] = array_slice($r, 3);
             }
         }
+        $vendas = [];  // data da foto -> e -> entrante de ativação D-1 (vendas da aba Ati)
+        foreach ($this->q("SELECT s.data_ref, e.entidade, SUM(s.entr_d1) FROM fat_snapshot_diario s
+                           JOIN vw_entidade e ON e.cod_ger = s.cod_ger WHERE s.tipo = 'ATIVACAO' GROUP BY s.data_ref, e.entidade") as [$d, $e, $v]) {
+            if (($e = self::ei($e)) !== null) {
+                $vendas[self::day($d)][$e] = $v;
+            }
+        }
         $commit = [];
         foreach ($this->q('SELECT c.data, e.entidade, c.tipo, SUM(c.compromisso) FROM man_compromisso c
                            JOIN vw_entidade e ON e.cod_ger = c.cod_ger GROUP BY c.data, e.entidade, c.tipo') as [$d, $e, $t, $v]) {
@@ -196,10 +203,22 @@ class FupController extends Controller
                     }
                 }
             }
-            // EFETIV = compromisso de instalação ÷ entrante médio de instalação; REAL e COBERT não existem no banco.
+            // EFETIV = compromisso de instalação ÷ entrante médio de instalação.
+            // REAL = realizado de ativação ÷ vendas (entrante de ativação), da foto da manhã seguinte; sem ela, a base atual.
+            // COBERT = real ÷ comprometida. Regra conferida contra a efetividade colada da planilha (decidido em 05/11/2026).
+            $V = $vendas[self::addDays($d, 1)] ?? [];
+            if (!$V) {
+                for ($e = 0; $e < 13; $e++) {
+                    if (array_key_exists("$e,1", $entrante[$d] ?? [])) {
+                        $V[$e] = $entrante[$d]["$e,1"];
+                    }
+                }
+            }
             $day['efet'] = [];
             for ($e = 0; $e < 13; $e++) {
-                $day['efet'][] = [self::ratio($day['commit'][$e][1], $day['entrAvg'][$e][1]), null, null];
+                $ef = self::ratio($day['commit'][$e][1], $day['entrAvg'][$e][1]);
+                $real = self::ratio($day['actual'][$e][1], self::f($V[$e] ?? null));
+                $day['efet'][] = [$ef, $real, self::ratio($real, $ef)];
             }
             if (!empty($hc[$d])) {
                 $day['hcCommit'] = array_map(fn ($e) => $hc[$d][$e] ?? [null, null], range(0, 12));
