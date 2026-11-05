@@ -31,6 +31,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\MonitorController;
 use App\Http\Controllers\ManutencaoController;
 use App\Http\Controllers\CampanhaNotaMaximaController;
+use App\Http\Controllers\FupController;
 use App\Http\Middleware\IsAdmin;
 use App\Services\ActivityLogService;
 
@@ -100,6 +101,9 @@ Route::middleware('api')->group(function () {
     Route::post('/access-requests', [AccessRequestController::class, 'store'])->middleware('throttle:login');
 
     Route::get('/campanha-nota-maxima/ranking', [CampanhaNotaMaximaController::class, 'ranking']);
+
+    // Portal FUP publico (somente leitura)
+    Route::get('/fup/dados', [FupController::class, 'dados'])->middleware('throttle:60,1');
 
     // Monitor SP publico por link magico (somente leitura)
     Route::middleware('monitor.magic')->prefix('monitor-public')->group(function () {

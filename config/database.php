@@ -150,6 +150,26 @@ return [
             ]) : [],
         ],
 
+        // Portal FUP (/fup): somente leitura no banco dw_fup
+        'fup' => [
+            'driver' => 'mysql',
+            'host' => env('FUP_DB_HOST', env('DB_HOST', '127.0.0.1')),
+            'port' => env('FUP_DB_PORT', env('DB_PORT', '3306')),
+            'database' => env('FUP_DB_DATABASE', 'dw_fup'),
+            'username' => env('FUP_DB_USERNAME', env('DB_USERNAME', 'forge')),
+            'password' => env('FUP_DB_PASSWORD', env('DB_PASSWORD', '')),
+            'unix_socket' => env('FUP_DB_SOCKET', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
     ],
 
     /*
