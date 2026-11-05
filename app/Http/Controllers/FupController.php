@@ -125,6 +125,14 @@ class FupController extends Controller
                 $vendas[self::day($d)][$e] = $v;
             }
         }
+        $legVendas = [];
+        foreach ($this->q('SELECT data, entidade, vendas FROM leg_vendas_ati') as [$d, $e, $v]) {
+            if (($e = self::ei($e)) !== null) {
+                $legVendas[self::day($d)][$e] = $v;
+            }
+        }
+        // vendas (entrante de ativação congelado) do dia x: foto da manhã seguinte, senão a aba Ati
+        $vendasDia = fn (string $x, int $e) => self::f($vendas[self::addDays($x, 1)][$e] ?? $legVendas[$x][$e] ?? null);
         $commit = [];
         foreach ($this->q('SELECT c.data, e.entidade, c.tipo, SUM(c.compromisso) FROM man_compromisso c
                            JOIN vw_entidade e ON e.cod_ger = c.cod_ger GROUP BY c.data, e.entidade, c.tipo') as [$d, $e, $t, $v]) {
@@ -203,7 +211,8 @@ class FupController extends Controller
                     }
                 }
             }
-            // EFETIV = compromisso de instalação ÷ entrante médio de instalação.
+            // EFETIV = compromisso de instalação ÷ média das vendas do mesmo dia da semana nas 4 semanas anteriores
+            // (igual à planilha); sem as 4 semanas, o entrante médio da foto.
             // REAL = realizado de ativação ÷ vendas (entrante de ativação), da foto da manhã seguinte; sem ela, a base atual.
             // COBERT = real ÷ comprometida. Regra conferida contra a efetividade colada da planilha (decidido em 05/11/2026).
             $V = $vendas[self::addDays($d, 1)] ?? [];
@@ -216,7 +225,9 @@ class FupController extends Controller
             }
             $day['efet'] = [];
             for ($e = 0; $e < 13; $e++) {
-                $ef = self::ratio($day['commit'][$e][1], $day['entrAvg'][$e][1]);
+                $sem = array_map(fn ($k) => $vendasDia(self::addDays($d, -7 * $k), $e), [1, 2, 3, 4]);
+                $base = in_array(null, $sem, true) ? $day['entrAvg'][$e][1] : array_sum($sem) / 4;
+                $ef = self::ratio($day['commit'][$e][1], $base);
                 $real = self::ratio($day['actual'][$e][1], self::f($V[$e] ?? null));
                 $day['efet'][] = [$ef, $real, self::ratio($real, $ef)];
             }
@@ -489,6 +500,13 @@ class FupController extends Controller
                 }
                 if (!empty($R['hcCommit'])) {
                     $day['hcCommit'] = $R['hcCommit'];
+                }
+                // efetividade que a planilha ainda não tinha calculado na extração (EFETIV 0 e REAL vazia): vem do robô
+                for ($e = 0; $e < 13; $e++) {
+                    if ($day['efet'][$e][1] === null && $R['efet'][$e][1] !== null) {
+                        $day['efet'][$e] = !$day['efet'][$e][0] ? $R['efet'][$e]
+                            : [$day['efet'][$e][0], $R['efet'][$e][1], self::ratio($R['efet'][$e][1], $day['efet'][$e][0])];
+                    }
                 }
             }
             $out[] = $day;
