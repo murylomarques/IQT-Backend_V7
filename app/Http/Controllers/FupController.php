@@ -118,11 +118,25 @@ class FupController extends Controller
                 $snap[self::day($r[0])]["$e,$t"] = array_slice($r, 3);
             }
         }
-        $vendas = [];  // data da foto -> e -> entrante de ativação D-1 (vendas da aba Ati)
-        foreach ($this->q("SELECT s.data_ref, e.entidade, SUM(s.entr_d1) FROM fat_snapshot_diario s
-                           JOIN vw_entidade e ON e.cod_ger = s.cod_ger WHERE s.tipo = 'ATIVACAO' GROUP BY s.data_ref, e.entidade") as [$d, $e, $v]) {
-            if (($e = self::ei($e)) !== null) {
+        $vendas = [];     // data da foto -> e -> entrante de ativação D-1 (vendas da aba Ati)
+        $entrFoto = [];   // data da foto -> "e,t" -> entrante D-1 congelado
+        foreach ($this->q('SELECT s.data_ref, e.entidade, s.tipo, SUM(s.entr_d1) FROM fat_snapshot_diario s
+                           JOIN vw_entidade e ON e.cod_ger = s.cod_ger GROUP BY s.data_ref, e.entidade, s.tipo') as [$d, $e, $t, $v]) {
+            [$e, $ti] = [self::ei($e), self::ti($t)];
+            if ($e === null || $ti === null) {
+                continue;
+            }
+            $entrFoto[self::day($d)]["$e,$ti"] = $v;
+            if ($t === 'ATIVACAO') {
                 $vendas[self::day($d)][$e] = $v;
+            }
+        }
+        $legEntr = [];  // aba ENTRANTE da planilha (até 02/11/2026)
+        foreach ($this->q('SELECT l.data, e.entidade, l.tipo, SUM(l.entrante) FROM leg_entrante_diario l
+                           JOIN vw_entidade e ON e.cod_ger = l.cod_ger GROUP BY l.data, e.entidade, l.tipo') as [$d, $e, $t, $v]) {
+            [$e, $t] = [self::ei($e), self::ti($t)];
+            if ($e !== null && $t !== null) {
+                $legEntr[self::day($d)]["$e,$t"] = $v;
             }
         }
         $legVendas = [];
@@ -131,8 +145,8 @@ class FupController extends Controller
                 $legVendas[self::day($d)][$e] = $v;
             }
         }
-        // vendas (entrante de ativação congelado) do dia x: foto da manhã seguinte, senão a aba Ati
-        $vendasDia = fn (string $x, int $e) => self::f($vendas[self::addDays($x, 1)][$e] ?? $legVendas[$x][$e] ?? null);
+        // vendas (entrante de ativação congelado) do dia x: aba Ati onde a planilha cobre, senão a foto da manhã seguinte
+        $vendasDia = fn (string $x, int $e) => self::f($legVendas[$x][$e] ?? $vendas[self::addDays($x, 1)][$e] ?? null);
         $commit = [];
         foreach ($this->q('SELECT c.data, e.entidade, c.tipo, SUM(c.compromisso) FROM man_compromisso c
                            JOIN vw_entidade e ON e.cod_ger = c.cod_ger GROUP BY c.data, e.entidade, c.tipo') as [$d, $e, $t, $v]) {
@@ -320,18 +334,24 @@ class FupController extends Controller
 
         [$days, $monthly, $capacity, $legAte] = $this->legado($days, $monthly, $capacity);
 
-        // cobertura de entrantes D-1: entrante do dia ÷ média dos 4 mesmos dias da semana anteriores (Reparo, Instalação e MEs)
+        // cobertura de entrantes D-1: entrante do dia ÷ média dos 4 mesmos dias da semana anteriores (Reparo, Instalação e MEs).
+        // Entrante congelado: aba ENTRANTE onde a planilha cobre, senão a foto da manhã seguinte (a base atual perde o mês anterior)
+        $entrDia = fn (string $x, int $e, int $t) => self::f($legEntr[$x]["$e,$t"] ?? $entrFoto[self::addDays($x, 1)]["$e,$t"] ?? null);
         foreach ($days as &$day) {
             $x = $day['date'];
-            $prev = array_map(fn ($k) => self::addDays($x, -7 * $k), [1, 2, 3, 4]);
-            if (isset($entrante[$x]) && count(array_filter($prev, fn ($p) => isset($entrante[$p]))) === 4) {
-                $day['entrCob'] = [];
-                for ($e = 0; $e < 13; $e++) {
-                    for ($t = 0; $t < 3; $t++) {
-                        $media = array_sum(array_map(fn ($p) => (float) ($entrante[$p]["$e,$t"] ?? 0), $prev)) / 4;
-                        $day['entrCob'][$e][$t] = self::ratio(self::f($entrante[$x]["$e,$t"] ?? null), $media);
+            $cob = array_fill(0, 13, array_fill(0, 3, null));
+            $algum = false;
+            for ($e = 0; $e < 13; $e++) {
+                for ($t = 0; $t < 3; $t++) {
+                    $vs = array_map(fn ($k) => $entrDia(self::addDays($x, -7 * $k), $e, $t), [1, 2, 3, 4]);
+                    if (!in_array(null, $vs, true)) {
+                        $cob[$e][$t] = self::ratio($entrDia($x, $e, $t), array_sum($vs) / 4);
+                        $algum = $algum || $cob[$e][$t] !== null;
                     }
                 }
+            }
+            if ($algum) {
+                $day['entrCob'] = $cob;
             }
         }
         unset($day);
