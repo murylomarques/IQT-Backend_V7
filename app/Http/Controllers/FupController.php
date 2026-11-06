@@ -265,6 +265,19 @@ class FupController extends Controller
                 $metas[self::day($m) . "|$s|$e"] = [self::f($a), self::f($b)];
             }
         }
+        // meta de efetividade de Ativação: polos em man_meta_mensal; regionais e Desktop digitados à parte (não são a média dos polos)
+        $metaEfet = [];
+        foreach ($this->q("SELECT mm.mes, g.sigla, mm.meta_efetividade FROM man_meta_mensal mm
+                           JOIN dim_gerencia g ON g.cod_ger = mm.cod_ger WHERE mm.servico = 'ATIVACAO' AND mm.meta_efetividade IS NOT NULL") as [$m, $e, $v]) {
+            if (($e = self::ei($e)) !== null) {
+                $metaEfet[self::day($m) . "|$e"] = self::f($v);
+            }
+        }
+        foreach ($this->q('SELECT mes, entidade, meta_efetividade FROM man_meta_efetividade_regional') as [$m, $e, $v]) {
+            if (($e = self::ei($e)) !== null) {
+                $metaEfet[self::day($m) . "|$e"] = self::f($v);
+            }
+        }
         $hoje = $snap ? max(array_keys($snap)) : date('Y-m-d');
         ksort($mens);
         $monthly = [];
@@ -313,7 +326,7 @@ class FupController extends Controller
                 ];
                 $rec['labels'] = ['churn' => 'Base churn', 'metaA' => 'Meta', 'metaB' => 'Meta B', 'projection' => 'Proj'];
             } else {
-                $rec += ['efetMonth' => array_fill(0, 13, null), 'efetTarget' => array_fill(0, 13, null), 'metaComercial' => array_fill(0, 13, null)];
+                $rec += ['efetMonth' => array_fill(0, 13, null), 'efetTarget' => array_map(fn ($e) => $metaEfet["$mes|$e"] ?? null, range(0, 12)), 'metaComercial' => array_fill(0, 13, null)];
             }
             $monthly[] = $rec;
         }
