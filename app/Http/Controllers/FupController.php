@@ -28,6 +28,8 @@ class FupController extends Controller
     private const TIPOS = ['REPARO', 'ATIVACAO', 'MUD_END', 'PREV', 'OUTROS', 'CHIP', 'RETIRADA'];
     private const TIPO8 = ['REPARO', 'ATIVACAO', 'MUD_END', 'PREV', 'OUTROS', 'CHIP', 'RETIRADA', 'TOTAL'];
     private const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    // feriados que a aba ENTRANTE troca pelo dia seguinte nas médias de 4 semanas (só os que a planilha troca: 02/11 ela mantém)
+    private const ENTR_FERIADOS = ['2026-10-12'];
     private const LEG_KEYS = [
         'du' => 'du', 'queue' => 'fila', 'emax' => 'estoque_maximo', 'entrAvg' => 'entrante_medio_d0', 'need' => 'necessidade',
         'commit' => 'compromisso', 'actual' => 'realizado', 'pctCommit' => 'pct_compromisso', 'pctNeed' => 'pct_necessidade',
@@ -237,13 +239,14 @@ class FupController extends Controller
                     }
                 }
             }
-            $day['efet'] = [];
+            $day['efet'] = $day['efetParts'] = []; // partes [compromisso inst, média vendas, realizado inst, vendas]: consolidado de fim de semana
             for ($e = 0; $e < 13; $e++) {
                 $sem = array_map(fn ($k) => $vendasDia(self::addDays($d, -7 * $k), $e), [1, 2, 3, 4]);
                 $base = in_array(null, $sem, true) ? $day['entrAvg'][$e][1] : array_sum($sem) / 4;
                 $ef = self::ratio($day['commit'][$e][1], $base);
                 $real = self::ratio($day['actual'][$e][1], self::f($V[$e] ?? null));
                 $day['efet'][] = [$ef, $real, self::ratio($real, $ef)];
+                $day['efetParts'][] = [$day['commit'][$e][1], $base, $day['actual'][$e][1], self::f($V[$e] ?? null)];
             }
             if (!empty($hc[$d])) {
                 $day['hcCommit'] = array_map(fn ($e) => $hc[$d][$e] ?? [null, null], range(0, 12));
@@ -352,22 +355,43 @@ class FupController extends Controller
         $entrDia = fn (string $x, int $e, int $t) => self::f($legEntr[$x]["$e,$t"] ?? $entrFoto[self::addDays($x, 1)]["$e,$t"] ?? null);
         foreach ($days as &$day) {
             $x = $day['date'];
-            $cob = array_fill(0, 13, array_fill(0, 3, null));
+            $cob = $partes = array_fill(0, 13, array_fill(0, 3, null)); // partes [entrante, média]: consolidado de fim de semana
             $algum = false;
             for ($e = 0; $e < 13; $e++) {
                 for ($t = 0; $t < 3; $t++) {
                     $vs = array_map(fn ($k) => $entrDia(self::addDays($x, -7 * $k), $e, $t), [1, 2, 3, 4]);
                     if (!in_array(null, $vs, true)) {
                         $cob[$e][$t] = self::ratio($entrDia($x, $e, $t), array_sum($vs) / 4);
+                        $partes[$e][$t] = [$entrDia($x, $e, $t), array_sum($vs) / 4];
                         $algum = $algum || $cob[$e][$t] !== null;
                     }
                 }
             }
             if ($algum) {
                 $day['entrCob'] = $cob;
+                $day['entrParts'] = $partes;
             }
         }
         unset($day);
+        // aba ENTRANTE da planilha: entrante congelado por dia e tipo (7 tipos), do 1º dia do portal − 56 dias (médias de até 8 semanas)
+        // até o último dia com foto; só os dias com algum valor
+        $entranteDia = ['dates' => [], 'values' => [], 'feriados' => self::ENTR_FERIADOS];
+        if ($days) {
+            for ($x = self::addDays($days[0]['date'], -56), $fim = $days[count($days) - 1]['date']; $x <= $fim; $x = self::addDays($x, 1)) {
+                $m = [];
+                $algum = false;
+                for ($e = 0; $e < 13; $e++) {
+                    for ($t = 0; $t < 7; $t++) {
+                        $m[$e][$t] = $entrDia($x, $e, $t);
+                        $algum = $algum || $m[$e][$t] !== null;
+                    }
+                }
+                if ($algum) {
+                    $entranteDia['dates'][] = $x;
+                    $entranteDia['values'][] = $m;
+                }
+            }
+        }
 
         $mapa = $this->mapa();
         $ult = $this->q('SELECT id, data_ref, inicio, fim, status, mensagem FROM log_execucao ORDER BY id DESC LIMIT 1')[0] ?? null;
@@ -383,7 +407,7 @@ class FupController extends Controller
                 'id' => (int) $ult[0], 'date' => self::day($ult[1]), 'start' => self::iso($ult[2]), 'end' => self::iso($ult[3]),
                 'status' => $ult[4], 'message' => $ult[5],
             ] : null,
-            'legacyUntil' => $legAte, 'mapa' => $mapa,
+            'legacyUntil' => $legAte, 'mapa' => $mapa, 'entrante' => $entranteDia,
         ];
         $validation = [
             'generated' => $data['sourceModified'] ?: $extracted,
