@@ -147,6 +147,12 @@ class FupController extends Controller
                 $legVendas[self::day($d)][$e] = $v;
             }
         }
+        $legMedia = []; // média de instalação colada no bloco do Compromissos D0 (denominador do EFETIV da planilha)
+        foreach ($this->q('SELECT data, entidade, media FROM leg_media_inst') as [$d, $e, $v]) {
+            if (($e = self::ei($e)) !== null) {
+                $legMedia[self::day($d)][$e] = $v;
+            }
+        }
         // vendas (entrante de ativação congelado) do dia x: aba Ati onde a planilha cobre, senão a foto da manhã seguinte
         $vendasDia = fn (string $x, int $e) => self::f($legVendas[$x][$e] ?? $vendas[self::addDays($x, 1)][$e] ?? null);
         $commit = [];
@@ -240,9 +246,14 @@ class FupController extends Controller
                 }
             }
             $day['efet'] = $day['efetParts'] = []; // partes [compromisso inst, média vendas, realizado inst, vendas]: consolidado de fim de semana
+            // a média colada no bloco do dia (leg_media_inst) vale sobre a calculada, para bater com a planilha
+            $day['efetSrc'] = count($legMedia[$d] ?? []) === 13 ? 'planilha' : 'calculada';
             for ($e = 0; $e < 13; $e++) {
                 $sem = array_map(fn ($k) => $vendasDia(self::addDays($d, -7 * $k), $e), [1, 2, 3, 4]);
                 $base = in_array(null, $sem, true) ? $day['entrAvg'][$e][1] : array_sum($sem) / 4;
+                if (($legMedia[$d][$e] ?? null) !== null) {
+                    $base = self::f($legMedia[$d][$e]);
+                }
                 $ef = self::ratio($day['commit'][$e][1], $base);
                 $real = self::ratio($day['actual'][$e][1], self::f($V[$e] ?? null));
                 $day['efet'][] = [$ef, $real, self::ratio($real, $ef)];
@@ -323,9 +334,12 @@ class FupController extends Controller
                 'gapDay' => $gapDay, 'projection' => $proj, 'coverage' => $cov, 'labels' => new \stdClass(),
             ];
             if ($svc === 'RETIRADA') {
+                // aba Ret <mês>: Meta 69% = meta do mês; Meta 72% = churn × 0,72; OBJETIVO = Proj ÷ Meta 72% (fatores digitados na planilha)
+                $churn = array_map(fn ($e) => $metas["$mes|$svc|$e"][1] ?? null, range(0, 12));
+                $metaB = array_map(fn ($c) => $c !== null ? $c * 0.72 : null, $churn);
                 $rec += [
-                    'churn' => array_map(fn ($e) => $metas["$mes|$svc|$e"][1] ?? null, range(0, 12)),
-                    'metaA' => array_fill(0, 13, null), 'metaB' => array_fill(0, 13, null), 'pctMetaB' => array_fill(0, 13, null),
+                    'churn' => $churn, 'metaA' => $tgt, 'metaB' => $metaB,
+                    'pctMetaB' => array_map(fn ($p, $b) => self::ratio($p, $b), $proj, $metaB),
                 ];
                 $rec['labels'] = ['churn' => 'Base churn', 'metaA' => 'Meta', 'metaB' => 'Meta B', 'projection' => 'Proj'];
             } else {
