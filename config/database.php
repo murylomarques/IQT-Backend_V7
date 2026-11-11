@@ -150,6 +150,24 @@ return [
             ]) : [],
         ],
 
+        // Portal FUP: gravação do Compromisso D0 (só man_compromisso). Usuário próprio com GRANT de INSERT/UPDATE nessa tabela;
+        // sem FUP_DB_WRITE_* configurado, usa o mesmo da leitura (e a gravação falha se ele for somente leitura).
+        'fup_escrita' => [
+            'driver' => env('FUP_DB_WRITE_DRIVER', 'mysql'),
+            'host' => env('FUP_DB_WRITE_HOST', env('FUP_DB_HOST', env('DB_HOST', '127.0.0.1'))),
+            'port' => env('FUP_DB_WRITE_PORT', env('FUP_DB_PORT', env('DB_PORT', '3306'))),
+            'database' => env('FUP_DB_WRITE_DATABASE', env('FUP_DB_DATABASE', 'dw_fup')),
+            'username' => env('FUP_DB_WRITE_USERNAME', env('FUP_DB_USERNAME', env('DB_USERNAME', 'forge'))),
+            'password' => env('FUP_DB_WRITE_PASSWORD', env('FUP_DB_PASSWORD', env('DB_PASSWORD', ''))),
+            'unix_socket' => env('FUP_DB_SOCKET', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+        ],
+
         // Portal FUP (/fup): somente leitura no banco dw_fup
         'fup' => [
             'driver' => 'mysql',

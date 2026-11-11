@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
- * Portal FUP (produção regional) — público, somente leitura, acessado por /fup.
+ * Portal FUP (produção regional) — acessado por /fup, com login próprio (FupAcessoController / middleware fup.auth).
  * Porte de FUP/portal-producao/db_portal.py: monta window.PORTAL_DATA / PORTAL_VALIDATION a partir do banco dw_fup.
  *
  * Bloco do dia X (igual ao Compromissos D0 da planilha):
@@ -36,13 +37,17 @@ class FupController extends Controller
         'pctCommitNeed' => 'pct_compromisso_x_necessidade',
     ];
 
-    /** GET /api/fup/dados → {data, validation} (cache curto, como o servidor local). */
-    public function dados()
+    /** GET /api/fup/dados → {data, validation, user} (cache curto, como o servidor local).
+     *  Cada usuário recebe só o que serve às telas liberadas para ele (igual ao filtrar() do server.py). */
+    public function dados(Request $request)
     {
         $ttl = max(30, (int) env('FUP_CACHE_SECONDS', 60));
 
         try {
             $payload = Cache::remember('fup:portal:v1', now()->addSeconds($ttl), fn () => $this->build());
+            $u = $request->attributes->get('fup_user');
+            $payload = self::filtrar($payload, $u['telas']);
+            $payload['user'] = FupAcessoController::pub($u);
 
             return response()->json($payload, 200, [], JSON_UNESCAPED_UNICODE);
         } catch (Throwable $exception) {
@@ -50,6 +55,26 @@ class FupController extends Controller
 
             return response()->json(['message' => 'Não foi possível ler o banco dw_fup.'], 500);
         }
+    }
+
+    /** Tira dos dados o que só serve a telas não liberadas (os blocos diários são a base de todas e ficam). */
+    public static function filtrar(array $payload, array $telas): array
+    {
+        $t = array_flip($telas);
+        $d = $payload['data'];
+        if (!isset($t['mapa'])) {
+            $d['mapa'] = null;
+        }
+        if (!isset($t['metas'])) {
+            $d['monthly'] = [];
+        }
+        if (!isset($t['capacity']) && !isset($t['resumo'])) {
+            $d['capacity'] = array_map(fn () => [], $d['capacity']);
+        }
+        if (!isset($t['entrantes']) && !isset($t['backlog'])) {
+            $d['entrante'] = null;
+        }
+        return ['data' => $d, 'validation' => isset($t['conferencia']) ? $payload['validation'] : null];
     }
 
     protected function q(string $sql, array $args = []): array

@@ -61,6 +61,11 @@ class RouteServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by($request->ip());
         });
 
+        RateLimiter::for('loginfup', function (Request $request) {
+            // por IP (a empresa sai por poucos IPs); cada usuário ainda bloqueia sozinho após 5 erros (FupAcessoController)
+            return Limit::perMinute(30)->by($request->ip());
+        });
+
         RateLimiter::for('moavi-token', function (Request $request) {
             return Limit::perMinute(20)->by($request->ip());
         });

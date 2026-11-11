@@ -67,6 +67,7 @@ class Kernel extends HttpKernel
         'throttle'         => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified'         => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'fca.auth'        => \App\Http\Middleware\FcaAuth::class,
+        'fup.auth'        => \App\Http\Middleware\FupAuth::class,
         'fca.admin'       => \App\Http\Middleware\FcaAdmin::class,
         'fca.admin_or_consulta' => \App\Http\Middleware\FcaAdminOrConsulta::class,
         'fca.supervisor'  => \App\Http\Middleware\FcaSupervisor::class,

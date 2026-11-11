@@ -32,6 +32,8 @@ use App\Http\Controllers\MonitorController;
 use App\Http\Controllers\ManutencaoController;
 use App\Http\Controllers\CampanhaNotaMaximaController;
 use App\Http\Controllers\FupController;
+use App\Http\Controllers\FupAcessoController;
+use App\Http\Controllers\FupCompromissoController;
 use App\Http\Middleware\IsAdmin;
 use App\Services\ActivityLogService;
 
@@ -102,8 +104,22 @@ Route::middleware('api')->group(function () {
 
     Route::get('/campanha-nota-maxima/ranking', [CampanhaNotaMaximaController::class, 'ranking']);
 
-    // Portal FUP publico (somente leitura)
-    Route::get('/fup/dados', [FupController::class, 'dados'])->middleware('throttle:60,1');
+    // Portal FUP: login proprio; dados e lancamento do Compromisso D0 so com sessao (fup.auth)
+    Route::get('/fup/estado', [FupAcessoController::class, 'estado'])->middleware('throttle:60,1');
+    Route::post('/fup/login', [FupAcessoController::class, 'login'])->middleware('throttle:loginfup');
+    Route::middleware(['fup.auth', 'throttle:120,1'])->prefix('fup')->group(function () {
+        Route::get('/dados', [FupController::class, 'dados']);
+        Route::get('/me', [FupAcessoController::class, 'me']);
+        Route::post('/logout', [FupAcessoController::class, 'logout']);
+        Route::post('/senha', [FupAcessoController::class, 'senha']);
+        Route::get('/usuarios', [FupAcessoController::class, 'usuarios']);
+        Route::post('/usuarios', [FupAcessoController::class, 'salvar']);
+        Route::post('/usuarios/excluir', [FupAcessoController::class, 'excluir']);
+        Route::get('/compromisso', [FupCompromissoController::class, 'estado']);
+        Route::post('/compromisso', [FupCompromissoController::class, 'salvar']);
+        Route::post('/compromisso/prorrogar', [FupCompromissoController::class, 'prorrogar']);
+        Route::get('/compromisso/log', [FupCompromissoController::class, 'log']);
+    });
 
     // Monitor SP publico por link magico (somente leitura)
     Route::middleware('monitor.magic')->prefix('monitor-public')->group(function () {
