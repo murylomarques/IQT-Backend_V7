@@ -41,7 +41,7 @@ class FupController extends Controller
      *  Cada usuário recebe só o que serve às telas liberadas para ele (igual ao filtrar() do server.py). */
     public function dados(Request $request)
     {
-        $ttl = max(30, (int) env('FUP_CACHE_SECONDS', 60));
+        $ttl = max(30, (int) env('FUP_CACHE_SECONDS', 300));  // 5 min: montar os dados leva ~12 s; o que o portal grava limpa o cache na hora
 
         try {
             $payload = Cache::remember('fup:portal:v1', now()->addSeconds($ttl), fn () => $this->build());

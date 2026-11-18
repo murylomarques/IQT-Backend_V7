@@ -15,11 +15,14 @@ use Throwable;
  * · Trava para todos, inclusive administrador; o administrador prorroga o dia de hoje (todos ou um usuário).
  * · Grava só o que mudou na dw_fup.man_compromisso (conexão fup_escrita), com atualizado_por = "portal:<usuário>";
  *   recusa se outra pessoa mudou a célula depois que a tela foi aberta.
+ * · Na mesma tela, HC INT e HC EPS comprometidos por polo (dw_fup.man_hc_compromisso), travando às 08:30 (a prorrogação vale também).
  * · Histórico e prorrogações: tabelas fup_compromisso_log e fup_prorrogacoes (banco do IQT).
  */
 class FupCompromissoController extends Controller
 {
     private const HORA_TRAVA = '09:00';
+    private const HORA_TRAVA_HC = '08:30';
+    private const HC = ['HC_INT' => 'hc_proprio', 'HC_EPS' => 'hc_terceiro'];            // chave na tela → coluna em man_hc_compromisso
     private const QUARTA = 3;                      // Carbon: domingo = 0 … sábado = 6
     private const MAX_VALOR = 100000;
     private const DIAS_SEM = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
@@ -74,10 +77,10 @@ class FupCompromissoController extends Controller
         return $out;
     }
 
-    private static function limite(string $usuario, string $data): string
+    private static function limite(string $usuario, string $data, string $padrao = self::HORA_TRAVA): string
     {
         $h = DB::table('fup_prorrogacoes')->where('data', $data)->whereIn('alvo', ['*', $usuario])->max('ate');
-        return $h && $h > self::HORA_TRAVA ? $h : self::HORA_TRAVA;
+        return $h && $h > $padrao ? $h : $padrao;
     }
 
     private function roboOk(string $d, int $n): array
@@ -94,6 +97,8 @@ class FupCompromissoController extends Controller
         [$robo, $exec] = $this->roboOk($data, $n);
         $lim = self::limite($usuario, $data);
         $fim = Carbon::parse("$data $lim", 'America/Sao_Paulo');
+        $limHc = self::limite($usuario, $data, self::HORA_TRAVA_HC);
+        $fimHc = Carbon::parse("$data $limHc", 'America/Sao_Paulo');
         if ($data === $agora->toDateString()) {
             $disp = $robo || self::fds($d);  // sábado/domingo já vêm lançados desde quarta
         } else {
@@ -104,6 +109,7 @@ class FupCompromissoController extends Controller
             'disponivel' => $disp, 'motivo' => $disp ? null : ($data === $agora->toDateString() ? 'espera' : 'fora'), 'robo' => $exec,
             'temNecessidade' => (bool) $robo, 'hora' => self::HORA_TRAVA, 'limite' => $lim, 'prorrogado' => $lim > self::HORA_TRAVA,
             'travado' => $agora->greaterThanOrEqualTo($fim), 'restanteS' => max(0, $fim->getTimestamp() - $agora->getTimestamp()),
+            'limiteHc' => $limHc, 'travadoHc' => $agora->greaterThanOrEqualTo($fimHc), 'restanteHcS' => max(0, $fimHc->getTimestamp() - $agora->getTimestamp()),
         ];
     }
 
@@ -122,6 +128,19 @@ class FupCompromissoController extends Controller
         $out = [];
         foreach ($this->q('SELECT cod_ger, tipo, compromisso, atualizado_por, atualizado_em FROM man_compromisso WHERE data = ?', [$data], 'fup_escrita') as [$c, $t, $v, $por, $em]) {
             $out["$c|$t"] = [self::num($v), $por, $em ? str_replace(' ', 'T', substr((string) $em, 0, 19)) : null];
+        }
+        return $out;
+    }
+
+    /** ["cod|chave" => [valor, por, em]] de man_hc_compromisso; $cols = chave na tela → coluna (self::HC). */
+    private function atuaisHc(string $data, array $cols): array
+    {
+        $out = [];
+        foreach (DB::connection('fup_escrita')->table('man_hc_compromisso')->where('data', $data)->get() as $r) {
+            $em = $r->atualizado_em ? str_replace(' ', 'T', substr((string) $r->atualizado_em, 0, 19)) : null;
+            foreach ($cols as $k => $col) {
+                $out["{$r->cod_ger}|$k"] = [self::num($r->$col), $r->atualizado_por, $em];
+            }
         }
         return $out;
     }
@@ -187,8 +206,18 @@ class FupCompromissoController extends Controller
                     + ['proj' => $proj[$k] ?? null, 'valor' => $a[0], 'por' => $a[1], 'em' => $a[2], 'comp7' => $comp7[$k] ?? null, 'real7' => $real7[$k] ?? null];
             }
         }
+        $atHc = $this->atuaisHc($data, self::HC);
+        $hc7 = $this->atuaisHc($d7, self::HC);
+        $hc = [];
+        foreach ($polos as $p) {
+            foreach (array_keys(self::HC) as $h) {
+                $k = $p['cod'] . '|' . $h;
+                $a = $atHc[$k] ?? [null, null, null];
+                $hc[$k] = ['valor' => $a[0], 'por' => $a[1], 'em' => $a[2], 'sem7' => $hc7[$k][0] ?? null];
+            }
+        }
         $out = ['data' => $data, 'hoje' => $agora->toDateString(), 'agora' => $agora->format('Y-m-d\TH:i:s'), 'janela' => $jan, 'dias' => $dias,
-            'polos' => $polos, 'tipos' => $tipos, 'celulas' => $cel, 'semanaAnterior' => $d7, 'modoTeste' => false];
+            'polos' => $polos, 'tipos' => $tipos, 'celulas' => $cel, 'hc' => $hc, 'semanaAnterior' => $d7, 'modoTeste' => false];
         if ($u['admin']) {
             $todos = null;
             $ind = [];
@@ -239,26 +268,58 @@ class FupCompromissoController extends Controller
             return $this->erro('Dados inválidos.');
         }
         [$polos, $tipos] = $this->dimensoes();
-        $jan = $this->janela($u['usuario'], $data, count($polos) * count($tipos));
-        if (!$jan['disponivel']) {
-            return $this->erro('A base de hoje ainda não foi atualizada pelo robô.');
-        }
-        if ($jan['travado']) {
-            return $this->erro('Lançamento de ' . Carbon::parse($data)->format('d/m') . " travado desde as {$jan['limite']}. Peça uma prorrogação ao administrador.");
-        }
-        $cods = array_column($polos, 'cod');
         $tps = array_column($tipos, 'tipo');
-        $atuais = $this->atuais($data);
+        $r = $this->compara($valores, $base, $this->atuais($data) + $this->atuaisHc($data, self::HC), array_column($polos, 'cod'), array_merge($tps, array_keys(self::HC)));
+        if (is_string($r)) {
+            return $this->erro($r);
+        }
+        [$mud, $conf] = $r;
+        $chaves = array_map(fn ($k) => explode('|', (string) $k)[1], array_keys($valores));
+        $jan = $this->janela($u['usuario'], $data, count($polos) * count($tipos));
+        if (array_intersect($chaves, $tps)) {
+            if (!$jan['disponivel']) {
+                return $this->erro('A base de hoje ainda não foi atualizada pelo robô.');
+            }
+            if ($jan['travado']) {
+                return $this->erro('Lançamento de ' . Carbon::parse($data)->format('d/m') . " travado desde as {$jan['limite']}. Peça uma prorrogação ao administrador.");
+            }
+        }
+        if (array_intersect($chaves, array_keys(self::HC)) && $jan['travadoHc']) {
+            return $this->erro('HC INT/EPS de ' . Carbon::parse($data)->format('d/m') . " travado desde as {$jan['limiteHc']}. Peça uma prorrogação ao administrador.");
+        }
+        if ($conf) {
+            return $this->erro('Outra pessoa alterou ' . implode(', ', array_slice($conf, 0, 6)) . '. Recarregue a tela para ver os valores atuais; nada foi gravado.');
+        }
+        if ($mud) {
+            $por = mb_substr('portal:' . $u['usuario'], 0, 60);
+            $comp = array_values(array_filter($mud, fn ($m) => !isset(self::HC[$m[1]])));
+            if ($comp) {
+                DB::connection('fup_escrita')->table('man_compromisso')->upsert(
+                    array_map(fn ($m) => ['data' => $data, 'cod_ger' => $m[0], 'tipo' => $m[1], 'compromisso' => $m[3], 'atualizado_por' => $por], $comp),
+                    ['data', 'cod_ger', 'tipo'], ['compromisso', 'atualizado_por']);
+            }
+            $this->gravaHc($data, array_filter($mud, fn ($m) => isset(self::HC[$m[1]])), self::HC, $por);
+            $this->registra($u, $data, $mud);
+        }
+        return response()->json(['gravadas' => count($mud), 'estado' => $this->montaEstado($u, $data)], 200, [], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Confere os valores enviados contra os gravados: [mudanças [cod, chave, de, para], conflitos] ou a mensagem de erro.
+     * Conflito = alguém mudou a célula depois que a tela foi aberta (o valor carregado, em $base, não bate com o atual).
+     */
+    private function compara(array $valores, array $base, array $atuais, array $cods, array $chaves)
+    {
         $mud = $conf = [];
         foreach ($valores as $k => $v) {
             $p = explode('|', (string) $k);
-            if (count($p) !== 2 || !ctype_digit($p[0]) || !in_array((int) $p[0], $cods, true) || !in_array($p[1], $tps, true)) {
-                return $this->erro('Dados inválidos.');
+            if (count($p) !== 2 || !ctype_digit($p[0]) || !in_array((int) $p[0], $cods, true) || !in_array($p[1], $chaves, true)) {
+                return 'Dados inválidos.';
             }
             [$c, $t] = [(int) $p[0], $p[1]];
             if ($v !== null) {
                 if (is_bool($v) || !is_numeric($v) || is_string($v) || (float) $v != (int) $v || $v < 0 || $v > self::MAX_VALOR) {
-                    return $this->erro("Valor inválido em $k: use um número inteiro de 0 a " . self::MAX_VALOR . '.');
+                    return "Valor inválido em $k: use um número inteiro de 0 a " . self::MAX_VALOR . '.';
                 }
                 $v = (int) $v;
             }
@@ -268,25 +329,38 @@ class FupCompromissoController extends Controller
                 continue;
             }
             $b = $base[$k] ?? null;
-            if (($b === null ? null : (int) $b) !== $atual) {  // alguém mudou essa célula depois que a tela foi aberta
+            if (($b === null ? null : (int) $b) !== $atual) {
                 $conf[] = "$c/$t (agora " . ($atual ?? 'vazio') . ')';
                 continue;
             }
             $mud[] = [$c, $t, $atual, $v];
         }
-        if ($conf) {
-            return $this->erro('Outra pessoa alterou ' . implode(', ', array_slice($conf, 0, 6)) . '. Recarregue a tela para ver os valores atuais; nada foi gravado.');
+        return [$mud, $conf];
+    }
+
+    /** Grava só as colunas alteradas de man_hc_compromisso (uma linha por dia × polo). */
+    private function gravaHc(string $data, array $mud, array $cols, string $por): void
+    {
+        $porCod = [];
+        foreach ($mud as [$c, $k, , $v]) {
+            $porCod[$c][$cols[$k]] = $v;
         }
-        if ($mud) {
-            $por = mb_substr('portal:' . $u['usuario'], 0, 60);
-            DB::connection('fup_escrita')->table('man_compromisso')->upsert(
-                array_map(fn ($m) => ['data' => $data, 'cod_ger' => $m[0], 'tipo' => $m[1], 'compromisso' => $m[3], 'atualizado_por' => $por], $mud),
-                ['data', 'cod_ger', 'tipo'], ['compromisso', 'atualizado_por']);
-            DB::table('fup_compromisso_log')->insert(array_map(fn ($m) => ['em' => $agora->toDateTimeString(), 'usuario' => $u['usuario'], 'acao' => 'valor',
-                'data' => $data, 'cod_ger' => $m[0], 'tipo' => $m[1], 'de' => $m[2], 'para' => $m[3]], $mud));
-            \Illuminate\Support\Facades\Cache::forget('fup:portal:v1');  // o portal passa a mostrar o compromisso novo
+        if (!$porCod) {
+            return;
         }
-        return response()->json(['gravadas' => count($mud), 'estado' => $this->montaEstado($u, $data)], 200, [], JSON_UNESCAPED_UNICODE);
+        $db = DB::connection('fup_escrita');
+        $db->transaction(function () use ($db, $data, $porCod, $por) {
+            foreach ($porCod as $c => $set) {
+                $db->table('man_hc_compromisso')->updateOrInsert(['data' => $data, 'cod_ger' => $c], $set + ['atualizado_por' => $por]);
+            }
+        });
+    }
+
+    private function registra(array $u, string $data, array $mud): void
+    {
+        DB::table('fup_compromisso_log')->insert(array_map(fn ($m) => ['em' => self::agora()->toDateTimeString(), 'usuario' => $u['usuario'], 'acao' => 'valor',
+            'data' => $data, 'cod_ger' => $m[0], 'tipo' => $m[1], 'de' => $m[2], 'para' => $m[3]], $mud));
+        \Illuminate\Support\Facades\Cache::forget('fup:portal:v1');  // o portal passa a mostrar o valor novo
     }
 
     /** POST /fup/compromisso/prorrogar {data, ate: "HH:MM"|null, usuario: string|null} (administrador; só hoje) */
