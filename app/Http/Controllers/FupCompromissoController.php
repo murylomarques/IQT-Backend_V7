@@ -9,24 +9,31 @@ use Throwable;
 
 /**
  * Portal FUP (/fup): lançamento do Compromisso D0 (porte do compromisso.py do portal local).
- * · Hoje: abre depois que o robô grava a foto do dia (necessidade) e trava às 09:00 (horário de Brasília).
- * · A partir de quarta-feira também o sábado e o domingo seguintes (aba PLAN_FDS), cada um travando às 09:00 do próprio dia;
+ * · Hoje: abre depois que o robô grava a foto do dia (necessidade) e trava às 08:30 (horário de Brasília).
+ * · A partir de quarta-feira também o sábado e o domingo seguintes (aba PLAN_FDS), cada um travando às 08:30 do próprio dia;
+ *   com feriado, os dias até ele também (ver datasAbertas);
  *   sem foto ainda, a referência é a projeção de entrantes (média do mesmo dia da semana nas 4 semanas anteriores).
- * · Trava para todos, inclusive administrador; o administrador prorroga o dia de hoje (todos ou um usuário).
+ * · Trava para todos, inclusive administrador; o administrador prorroga o dia de hoje (todos ou um usuário), só para um horário
+ *   que ainda não passou. Removida a prorrogação, a pessoa volta a ficar travada na hora (o servidor recusa gravar).
  * · Grava só o que mudou na dw_fup.man_compromisso (conexão fup_escrita), com atualizado_por = "portal:<usuário>";
  *   recusa se outra pessoa mudou a célula depois que a tela foi aberta.
- * · Na mesma tela, HC INT e HC EPS comprometidos por polo (dw_fup.man_hc_compromisso), travando às 08:30 (a prorrogação vale também).
+ * · Na mesma tela, HC INT e HC EPS comprometidos por polo (dw_fup.man_hc_compromisso), com a mesma trava das 08:30 (a prorrogação vale também).
  * · Histórico e prorrogações: tabelas fup_compromisso_log e fup_prorrogacoes (banco do IQT).
  */
 class FupCompromissoController extends Controller
 {
-    private const HORA_TRAVA = '09:00';
-    private const HORA_TRAVA_HC = '08:30';
+    private const HORA_TRAVA = '08:30';           // todas as colunas (serviços e HC INT/EPS) travam no mesmo horário
+    private const HORA_TRAVA_HC = self::HORA_TRAVA;
     private const HC = ['HC_INT' => 'hc_proprio', 'HC_EPS' => 'hc_terceiro'];            // chave na tela → coluna em man_hc_compromisso
     private const QUARTA = 3;                      // Carbon: domingo = 0 … sábado = 6
     private const MAX_VALOR = 100000;
     private const DIAS_SEM = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
     private const ENTR_FERIADOS = ['2026-10-12'];  // mesmos do FupController / db_portal.py
+    // feriados nacionais (Carnaval e Corpus Christi são ponto facultativo, ficam de fora); incluir os anos seguintes aqui
+    private const FERIADOS = [
+        '2026-01-01', '2026-04-03', '2026-04-21', '2026-05-01', '2026-09-07', '2026-10-12', '2026-11-02', '2026-11-15', '2026-11-20', '2026-12-25',
+        '2027-01-01', '2027-03-26', '2027-04-21', '2027-05-01', '2027-09-07', '2027-10-12', '2027-11-02', '2027-11-15', '2027-11-20', '2027-12-25',
+    ];
 
     private static function agora(): Carbon
     {
@@ -61,20 +68,50 @@ class FupCompromissoController extends Controller
         return $d->dayOfWeek === 0 || $d->dayOfWeek === 6;
     }
 
-    /** Hoje + sábado/domingo seguintes quando já passou da quarta-feira daquela semana (datas Y-m-d). */
+    private static function feriado(Carbon $d): bool
+    {
+        return in_array($d->toDateString(), self::FERIADOS, true);
+    }
+
+    /** Sábado, domingo ou feriado nacional. */
+    private static function folga(Carbon $d): bool
+    {
+        return self::fds($d) || self::feriado($d);
+    }
+
+    /**
+     * Hoje + os dias lançados antes de cada folga (sábado, domingo e feriados seguidos formam um bloco), datas Y-m-d:
+     * · bloco que começa no sábado: abre na quarta anterior, só os dias do bloco (ex.: feriado na segunda → sáb, dom, seg);
+     * · bloco que começa num feriado de dia de semana: abre 2 dias antes, com os dias úteis até ele
+     *   (ex.: feriado na sexta → na quarta aparecem quinta, sexta, sábado e domingo).
+     */
     public static function datasAbertas(Carbon $hoje): array
     {
         $out = [$hoje->toDateString()];
-        for ($k = 1; $k <= 4; $k++) {
-            $d = $hoje->copy()->addDays($k);
-            if (self::fds($d)) {
-                $quarta = $d->copy()->subDays(($d->dayOfWeek === 0 ? 7 : $d->dayOfWeek) - self::QUARTA);
-                if ($hoje->toDateString() >= $quarta->toDateString()) {
-                    $out[] = $d->toDateString();
+        $d = $hoje->copy()->addDay();
+        $fim = $hoje->copy()->addDays(10);
+        while ($d->lte($fim)) {
+            $antes = $d->copy()->subDay();
+            if (!self::folga($d) || ($antes->gt($hoje) && self::folga($antes))) {  // procura o 1º dia de cada bloco (de amanhã em diante)
+                $d->addDay();
+                continue;
+            }
+            $ini = $d->copy();
+            $ult = $d->copy();
+            while (self::folga($ult->copy()->addDay())) {
+                $ult->addDay();
+            }
+            $sabado = $ini->dayOfWeek === 6;
+            $abre = $ini->copy()->subDays($sabado ? 6 - self::QUARTA : 2);
+            if ($hoje->gte($abre)) {
+                $x = $sabado ? $ini->copy() : $hoje->copy()->addDay();
+                for (; $x->lte($ult); $x->addDay()) {
+                    $out[] = $x->toDateString();
                 }
             }
+            $d = $ult->copy()->addDay();
         }
-        return $out;
+        return array_values(array_unique($out));
     }
 
     private static function limite(string $usuario, string $data, string $padrao = self::HORA_TRAVA): string
@@ -100,12 +137,12 @@ class FupCompromissoController extends Controller
         $limHc = self::limite($usuario, $data, self::HORA_TRAVA_HC);
         $fimHc = Carbon::parse("$data $limHc", 'America/Sao_Paulo');
         if ($data === $agora->toDateString()) {
-            $disp = $robo || self::fds($d);  // sábado/domingo já vêm lançados desde quarta
+            $disp = $robo || self::folga($d);  // sábado/domingo/feriado já vêm lançados desde antes
         } else {
             $disp = in_array($data, self::datasAbertas($agora->copy()->startOfDay()), true);
         }
         return [
-            'data' => $data, 'diaSemana' => self::DIAS_SEM[$d->dayOfWeek], 'tipo' => $data === $agora->toDateString() ? 'hoje' : 'fds',
+            'data' => $data, 'diaSemana' => self::DIAS_SEM[$d->dayOfWeek], 'feriado' => self::feriado($d), 'tipo' => $data === $agora->toDateString() ? 'hoje' : 'fds',
             'disponivel' => $disp, 'motivo' => $disp ? null : ($data === $agora->toDateString() ? 'espera' : 'fora'), 'robo' => $exec,
             'temNecessidade' => (bool) $robo, 'hora' => self::HORA_TRAVA, 'limite' => $lim, 'prorrogado' => $lim > self::HORA_TRAVA,
             'travado' => $agora->greaterThanOrEqualTo($fim), 'restanteS' => max(0, $fim->getTimestamp() - $agora->getTimestamp()),
@@ -382,6 +419,9 @@ class FupCompromissoController extends Controller
             }
             if ($ate <= self::HORA_TRAVA) {
                 return $this->erro('A prorrogação precisa ser depois das ' . self::HORA_TRAVA . '.');
+            }
+            if ($ate <= $agora->format('H:i')) {
+                return $this->erro('Esse horário já passou (agora são ' . $agora->format('H:i') . '). Escolha um horário mais tarde.');
             }
         }
         $alvo = $request->input('usuario');

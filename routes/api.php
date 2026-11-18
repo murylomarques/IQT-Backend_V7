@@ -109,6 +109,7 @@ Route::middleware('api')->group(function () {
     Route::post('/fup/login', [FupAcessoController::class, 'login'])->middleware('throttle:loginfup');
     Route::middleware(['fup.auth', 'throttle:120,1'])->prefix('fup')->group(function () {
         Route::get('/dados', [FupController::class, 'dados']);
+        Route::get('/versao', [FupController::class, 'versao']);
         Route::get('/me', [FupAcessoController::class, 'me']);
         Route::post('/logout', [FupAcessoController::class, 'logout']);
         Route::post('/senha', [FupAcessoController::class, 'senha']);

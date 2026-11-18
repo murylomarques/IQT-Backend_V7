@@ -44,15 +44,43 @@ class FupController extends Controller
         $ttl = max(30, (int) env('FUP_CACHE_SECONDS', 300));  // 5 min: montar os dados leva ~12 s; o que o portal grava limpa o cache na hora
 
         try {
-            $payload = Cache::remember('fup:portal:v1', now()->addSeconds($ttl), fn () => $this->build());
+            // o cache só vale enquanto a versão dos dados não muda (compromisso/HC gravado por qualquer processo, robô novo)
+            $versao = $this->versaoAtual();
+            $payload = Cache::get('fup:portal:v1');
+            if (!is_array($payload) || ($payload['versao'] ?? null) !== $versao) {
+                $payload = $this->build();
+                $payload['versao'] = $versao;
+                Cache::put('fup:portal:v1', $payload, now()->addSeconds($ttl));
+            }
             $u = $request->attributes->get('fup_user');
             $payload = self::filtrar($payload, $u['telas']);
+            $payload['versao'] = $versao;   // o portal compara com GET /versao para saber quando atualizar
             $payload['user'] = FupAcessoController::pub($u);
 
             return response()->json($payload, 200, [], JSON_UNESCAPED_UNICODE);
         } catch (Throwable $exception) {
             report($exception);
 
+            return response()->json(['message' => 'Não foi possível ler o banco dw_fup.'], 500);
+        }
+    }
+
+    /** Versão dos dados: muda quando alguém grava compromisso ou HC (atualizado_em, ON UPDATE nas duas tabelas) ou o robô roda. */
+    private function versaoAtual(): string
+    {
+        $r = $this->q("SELECT (SELECT MAX(atualizado_em) FROM man_compromisso WHERE data >= CURDATE() - INTERVAL 7 DAY),
+                              (SELECT MAX(atualizado_em) FROM man_hc_compromisso WHERE data >= CURDATE() - INTERVAL 7 DAY),
+                              (SELECT MAX(id) FROM log_execucao)")[0];
+        return md5(implode('|', array_map('strval', $r)));
+    }
+
+    /** GET /api/fup/versao → {versao}: o portal pergunta a cada 30 s e só baixa /dados de novo quando muda (consulta leve). */
+    public function versao()
+    {
+        try {
+            return response()->json(['versao' => $this->versaoAtual()]);
+        } catch (Throwable $exception) {
+            report($exception);
             return response()->json(['message' => 'Não foi possível ler o banco dw_fup.'], 500);
         }
     }
@@ -226,9 +254,13 @@ class FupController extends Controller
             foreach (['du', 'queue', 'emax', 'entrAvg', 'need', 'commit', 'actual'] as $key) {
                 $day[$key] = self::blank(8);
             }
+            $day['queueRet'] = array_fill(0, 13, null);  // fila de Retiradas: fica fora da Fila Total (como na planilha), só para o relatório FILA TOTAL
             foreach ($S as $et => [$fila, $du, $emax, $entr, $nec]) {
                 [$e, $t] = array_map('intval', explode(',', $et));
                 $day['queue'][$e][$t] = $t < 6 ? self::f($fila) : null;
+                if ($t === 6) {
+                    $day['queueRet'][$e] = self::f($fila);
+                }
                 $day['du'][$e][$t] = $t < 6 ? self::f($du) : null;
                 $day['emax'][$e][$t] = $t < 6 ? self::f($emax) : null;
                 $day['entrAvg'][$e][$t] = self::f($entr);
